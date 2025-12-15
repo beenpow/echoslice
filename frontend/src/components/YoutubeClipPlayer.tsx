@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 
 declare global {
     interface Window {
         YT: any;
-        onYoutubeIframeAPIReady: () => void;
+        onYouTubeIframeAPIReady: () => void;
     }
 }
 
@@ -15,23 +15,49 @@ type Props = {
 
 export default function YoutubeClipPlayer({ videoId, startSec, endSec }: Props) {
     const containerRef = useRef<HTMLDivElement>(null);
+    const playerRef = useRef<any>(null);
 
     useEffect(() => {
+        const loadAndCreate = () => {
+            if (!window.YT || !containerRef.current) return;
+
+            if (!playerRef.current) {
+                playerRef.current = new window.YT.Player(containerRef.current, {
+                    height: "360",
+                    width: "640",
+                    videoId,
+                    playerVars: {
+                        controls: 1,
+                    },
+                    events: {
+                        onReady: () => {
+                            console.log("Player ready");
+                        },
+                    },
+                });
+            }
+        };
+
         // 1) Skip if YT is already loaded
         if (window.YT) {
-            console.log("Youtube IFrame API alread loaded");
+            loadAndCreate();
             return;
         }
         // 2) add script tag
-        const tag = document.createElement("script");
-        tag.src = "https://www.youtube.com/iframe_api";
-        document.body.appendChild(tag);
+        const existing = document.querySelector('script[src="https://www.youtube.com/iframe_api"]');
+        if (!existing) {
+          const tag = document.createElement("script");
+          tag.src = "https://www.youtube.com/iframe_api";
+          document.body.appendChild(tag);
+        }
+        
 
         // 3. Load done callback
-        window.onYoutubeIframeAPIReady = () => {
+        window.onYouTubeIframeAPIReady = () => {
             console.log("Youtube IFrame API ready");
+            loadAndCreate();
         };
-    }, []);
+    }, [videoId]);
 
     return (
         <div>
