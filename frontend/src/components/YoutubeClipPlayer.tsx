@@ -1,5 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 
+declare global {
+    interface Window {
+        YT: any;
+        onYoutubeIframeAPIReady: () => void;
+    }
+}
+
 type Props = {
     videoId: string;
     startSec: number;
@@ -7,8 +14,24 @@ type Props = {
 };
 
 export default function YoutubeClipPlayer({ videoId, startSec, endSec }: Props) {
-    // (1) ref for the DOM
     const containerRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        // 1) Skip if YT is already loaded
+        if (window.YT) {
+            console.log("Youtube IFrame API alread loaded");
+            return;
+        }
+        // 2) add script tag
+        const tag = document.createElement("script");
+        tag.src = "https://www.youtube.com/iframe_api";
+        document.body.appendChild(tag);
+
+        // 3. Load done callback
+        window.onYoutubeIframeAPIReady = () => {
+            console.log("Youtube IFrame API ready");
+        };
+    }, []);
 
     return (
         <div>
