@@ -17,6 +17,7 @@ export default function YoutubeClipPlayer({ videoId, startSec, endSec }: Props) 
     const containerRef = useRef<HTMLDivElement>(null);
     const playerRef = useRef<any>(null);
     const [isPlaying, setIsPlaying] = useState(false);
+    const [isLooping, setIsLooping] = useState(false);
 
     const handlePlayFromStart = () => {
         const player = playerRef.current;
@@ -43,14 +44,19 @@ export default function YoutubeClipPlayer({ videoId, startSec, endSec }: Props) 
 
             const current = player.getCurrentTime();
             if (current >= endSec) {
-                player.pauseVideo();
-                setIsPlaying(false);
+                if (isLooping) {
+                    player.seekTo(startSec, true);
+                    player.playVideo();
+                } else {
+                    player.pauseVideo();
+                    setIsPlaying(false);
+                }
             }
         }, 200);
         return () => {
             window.clearInterval(intervalId);
         };
-    }, [isPlaying, endSec]);
+    }, [isPlaying, endSec, isLooping, startSec]);
 
     useEffect(() => {
         const loadAndCreate = () => {
@@ -109,6 +115,9 @@ export default function YoutubeClipPlayer({ videoId, startSec, endSec }: Props) 
                 <button onClick={handlePlayFromStart}>Play from startSec</button>
                 <button onClick={handlePause} style = {{ marginLeft: 8}}>
                     Pause
+                </button>
+                <button onClick={() => setIsLooping((prev) => !prev)}>
+                    Loop: {isLooping ? "ON" : "OFF"}
                 </button>
             </div>
 
