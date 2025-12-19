@@ -17,6 +17,21 @@ export default function YoutubeClipPlayer({ videoId, startSec, endSec }: Props) 
     const containerRef = useRef<HTMLDivElement>(null);
     const playerRef = useRef<any>(null);
 
+    const handlePlayFromStart = () => {
+        const player = playerRef.current;
+        if (!player) return;
+
+        player.seekTo(startSec, true);
+        player.playVideo();
+    };
+
+    const handlePause = () => {
+        const player = playerRef.current;
+        if (!player) return;
+
+        player.pauseVideo();
+    };
+
     useEffect(() => {
         const loadAndCreate = () => {
             if (!window.YT || !containerRef.current) return;
@@ -51,7 +66,6 @@ export default function YoutubeClipPlayer({ videoId, startSec, endSec }: Props) 
           document.body.appendChild(tag);
         }
         
-
         // 3. Load done callback
         window.onYouTubeIframeAPIReady = () => {
             console.log("Youtube IFrame API ready");
@@ -71,6 +85,12 @@ export default function YoutubeClipPlayer({ videoId, startSec, endSec }: Props) 
                     background: "#222",
                 }}
             />
+            <div style={{ marginTop: 8 }}>
+                <button onClick={handlePlayFromStart}>Play from startSec</button>
+                <button onClick={handlePause} style = {{ marginLeft: 8}}>
+                    Pause
+                </button>
+            </div>
 
             <div>VideoId: {videoId}</div>
             <div>
