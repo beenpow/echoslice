@@ -6,7 +6,7 @@ function App() {
     return (
         <div>
           <h1>EchoSlice</h1>
-            <YoutubeClipPlayer videoId="dQw4w9WgXcQ" startSec={30} endSec={45} />
+            <YoutubeClipPlayer videoId="Ks-_Mh1QhMc" startSec={110} endSec={140} />
         </div>
     );
 }

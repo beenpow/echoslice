@@ -17,7 +17,8 @@ export default function YoutubeClipPlayer({ videoId, startSec, endSec }: Props) 
     const containerRef = useRef<HTMLDivElement>(null);
     const playerRef = useRef<any>(null);
     const [isPlaying, setIsPlaying] = useState(false);
-    const [isLooping, setIsLooping] = useState(false);
+    const [isLooping, setIsLooping] = useState(true);
+    const [isCCOn, setIsCCOn] = useState(true);
 
     const handlePlayFromStart = () => {
         const player = playerRef.current;
@@ -35,6 +36,19 @@ export default function YoutubeClipPlayer({ videoId, startSec, endSec }: Props) 
         player.pauseVideo();
         setIsPlaying(false);
     };
+
+    useEffect(() => {
+        const player = playerRef.current;
+        if (!player) return;
+        if (isCCOn) {
+            player.loadModule("captions");
+            player.setOption("captions", "track", {
+                languageCode: "en",
+            });
+        } else {
+            player.unloadModule("captions");
+        }
+    }, [isCCOn]);
     useEffect(() => {
         if (!isPlaying) return;
 
@@ -69,6 +83,8 @@ export default function YoutubeClipPlayer({ videoId, startSec, endSec }: Props) 
                     videoId,
                     playerVars: {
                         controls: 1,
+                        cc_load_policy: 1,
+                        cc_lang_pref: "en",
                     },
                     events: {
                         onReady: () => {
@@ -106,8 +122,8 @@ export default function YoutubeClipPlayer({ videoId, startSec, endSec }: Props) 
             <div
                 ref={containerRef}
                 style={{
-                    width: 640,
-                    height: 360,
+                    width: 1000,
+                    height: 800,
                     background: "#222",
                 }}
             />
@@ -119,6 +135,9 @@ export default function YoutubeClipPlayer({ videoId, startSec, endSec }: Props) 
                 <button onClick={() => setIsLooping((prev) => !prev)}>
                     Loop: {isLooping ? "ON" : "OFF"}
                 </button>
+                <button onClick={() => setIsCCOn((prev) => !prev)}>
+                    CC: {isCCOn ? "ON" : "OFF"}
+                </button>                
             </div>
 
             <div>VideoId: {videoId}</div>
