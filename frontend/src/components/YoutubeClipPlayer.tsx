@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 declare global {
     interface Window {
@@ -16,6 +16,7 @@ type Props = {
 export default function YoutubeClipPlayer({ videoId, startSec, endSec }: Props) {
     const containerRef = useRef<HTMLDivElement>(null);
     const playerRef = useRef<any>(null);
+    const [isPlaying, setIsPlaying] = useState(false);
 
     const handlePlayFromStart = () => {
         const player = playerRef.current;
@@ -23,6 +24,7 @@ export default function YoutubeClipPlayer({ videoId, startSec, endSec }: Props) 
 
         player.seekTo(startSec, true);
         player.playVideo();
+        setIsPlaying(true);
     };
 
     const handlePause = () => {
@@ -30,7 +32,25 @@ export default function YoutubeClipPlayer({ videoId, startSec, endSec }: Props) 
         if (!player) return;
 
         player.pauseVideo();
+        setIsPlaying(false);
     };
+    useEffect(() => {
+        if (!isPlaying) return;
+
+        const intervalId = window.setInterval(() => {
+            const player = playerRef.current;
+            if (!player || !player.getCurrentTime) return;
+
+            const current = player.getCurrentTime();
+            if (current >= endSec) {
+                player.pauseVideo();
+                setIsPlaying(false);
+            }
+        }, 200);
+        return () => {
+            window.clearInterval(intervalId);
+        };
+    }, [isPlaying, endSec]);
 
     useEffect(() => {
         const loadAndCreate = () => {
