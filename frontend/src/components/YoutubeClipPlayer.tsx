@@ -15,6 +15,7 @@ type Props = {
 
 export default function YoutubeClipPlayer({ videoId, startSec, endSec }: Props) {
     const containerRef = useRef<HTMLDivElement>(null);
+    const playBtnRef = useRef<HTMLButtonElement>(null);
     const playerRef = useRef<any>(null);
     const [isPlaying, setIsPlaying] = useState(false);
     const [isLooping, setIsLooping] = useState(true);
@@ -36,6 +37,24 @@ export default function YoutubeClipPlayer({ videoId, startSec, endSec }: Props) 
         player.pauseVideo();
         setIsPlaying(false);
     };
+
+    useEffect(() => {
+        const onKeyDown = (e: KeyboardEvent) => {
+            const target = e.target as HTMLElement | null;
+            const tag = target?.tagName?.toLowerCase();
+            const isTyping = 
+                tag == "input" || tag == "textarea" || (target as any)?.isContentEditable;
+            
+            if (isTyping) return;
+            if (e.code == "Space") {
+                e.preventDefault();
+                handlePlayFromStart();
+            }
+        };
+        window.addEventListener("keydown", onKeyDown);
+        return () => window.removeEventListener("keydown", onKeyDown);
+
+    }, [startSec, videoId, endSec]);
 
     useEffect(() => {
         const player = playerRef.current;
@@ -128,7 +147,7 @@ export default function YoutubeClipPlayer({ videoId, startSec, endSec }: Props) 
                 }}
             />
             <div style={{ marginTop: 8 }}>
-                <button onClick={handlePlayFromStart}>Play from startSec</button>
+                <button ref={playBtnRef} onClick={handlePlayFromStart}>Play from startSec</button>
                 <button onClick={handlePause} style = {{ marginLeft: 8}}>
                     Pause
                 </button>
