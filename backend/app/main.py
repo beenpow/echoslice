@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from app.db import init_db, DB_PATH
 
 app = FastAPI(title="EchoSlice API", version="0.0.1")
 
@@ -15,6 +16,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.on_event("startup")
+def on_startup():
+    init_db()
+
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "echoslice-backend"}
+
+@app.get("/db/health")
+def db_health():
+    return {"db": "ok", "path": str(DB_PATH)}
