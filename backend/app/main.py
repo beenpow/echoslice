@@ -1,7 +1,9 @@
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 from app.db import init_db, DB_PATH
 from app.db import get_conn
+from datetime import datetime, timedelta, timezone
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from typing import Any
 
 app = FastAPI(title="EchoSlice API", version="0.0.1")
@@ -17,6 +19,20 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+class ReviewCreate(BaseModel):
+    clipId: int
+    score: int # 1 - 5
+def calc_next_review_at(score: int) -> datetime:
+    if score <= 2:
+        days = 1
+    elif score == 3:
+        days = 3
+    elif score == 4:
+        days = 7
+    else:
+        days = 14
+    return datetime.now(timezone.utc) + timedelta(days=days)
 
 
 @app.on_event("startup")
@@ -52,3 +68,42 @@ def get_today_clips() -> list[dict[str, Any]]:
         }
         for row in rows
     ]
+
+@app.post("/reviews")
+def create_review(payload: ReviewCreate):
+    if payload.score < 1 or payload.score > 5:
+        raise HTTPException(status_code=400, detail="score must be between 1 and 5")
+
+    now = datetime.now(timezone.utc)
+    next_dt = calc_next_review_at(payload.score)
+
+    reviewed_at = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    next_review_at = next_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+    
+    with get_conn() as conn:
+        clip = conn.execute(
+            "SELECT id FROM clips WHERE id = ?",
+            (payload.clipId,),
+        ).fetchone()
+
+        if not clip:
+            raise HTTPException(status_code=404, detail="clip not found")
+        
+        cur = conn.execute(
+            """
+            INSERT INTO reviews (clip_id, score, reviewed_at, next_review_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (payload.clipId, payload.score, reviewed_at, next_review_at),
+        )
+        conn.commit()
+
+        review_id = cur.lastrowid
+    
+    return {
+        "id": review_id,
+        "clipId": payload.clipId,
+        "score": payload.score,
+        "reviewedAt": reviewed_at,
+        "nextReviewAt": next_review_at,
+    }
