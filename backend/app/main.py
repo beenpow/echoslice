@@ -107,3 +107,34 @@ def create_review(payload: ReviewCreate):
         "reviewedAt": reviewed_at,
         "nextReviewAt": next_review_at,
     }
+
+@app.get("/reviews/today")
+def get_today_reviews():
+    today_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                r.id,
+                r.clip_id,
+                r.score,
+                r.reviewed_at,
+                r.next_review_at
+            FROM reviews r
+            WHERE r.reviewed_at LIKE ?
+            ORDER BY r.reviewed_at DESC
+            """,
+            (f"{today_utc}%",),
+        ).fetchall()
+    
+    return [
+        {
+            "id": row["id"],
+            "clipId": row["clip_id"],
+            "score": row["score"],
+            "reviewedAt": row["reviewed_at"],
+            "nextReviewAt": row["next_review_at"],
+        }
+        for row in rows
+    ]
