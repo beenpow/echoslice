@@ -49,15 +49,52 @@ def db_health():
 
 
 @app.get("/clips/today")
-def get_today_clips() -> list[dict[str, Any]]:
+def get_today_clips():
+    now_utc = datetime.now(timezone.utc)
+    now_str = now_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
+    today_str = now_utc.strftime("%Y-%m-%d")
+
     with get_conn() as conn:
         rows = conn.execute(
             """
-            SELECT id, video_id, start_sec, end_sec, title
-            FROM clips
-            ORDER BY id DESC
-            """
+            SELECT
+              c.id,
+              c.video_id,
+              c.start_sec,
+              c.end_sec,
+              c.title,
+              COALESCE(r_due.next_review_at, '1970-01-01T00:00:00Z') AS next_review_at
+            FROM clips c
+            -- 각 clip에 대해 "가장 최근 review의 next_review_at"을 구한다
+            LEFT JOIN (
+              SELECT
+                clip_id,
+                MAX(next_review_at) AS next_review_at
+              FROM reviews
+              GROUP BY clip_id
+            ) r_due
+            ON r_due.clip_id = c.id
+            WHERE
+              -- 1) due 조건: 리뷰가 한 번도 없으면(신규) due로 취급해서 포함
+              (
+                r_due.next_review_at IS NULL
+                OR r_due.next_review_at <= ?
+              )
+              -- 2) 오늘 이미 한 clip은 제외
+              AND c.id NOT IN (
+                SELECT clip_id
+                FROM reviews
+                WHERE reviewed_at LIKE ?
+              )
+            ORDER BY
+              -- 신규(리뷰 없음) 먼저, 그 다음 due가 오래된 순
+              CASE WHEN r_due.next_review_at IS NULL THEN 0 ELSE 1 END,
+              r_due.next_review_at ASC
+            LIMIT 5
+            """,
+            (now_str, f"{today_str}%"),
         ).fetchall()
+
     return [
         {
             "id": row["id"],
@@ -65,6 +102,7 @@ def get_today_clips() -> list[dict[str, Any]]:
             "startSec": row["start_sec"],
             "endSec": row["end_sec"],
             "title": row["title"],
+            "nextReviewAt": row["next_review_at"],
         }
         for row in rows
     ]
