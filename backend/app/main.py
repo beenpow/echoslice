@@ -192,6 +192,38 @@ def health():
 def db_health():
     return {"db": "ok", "path": str(DB_PATH)}
 
+@app.get("/today")
+def get_today_payload():
+    day = today_str_utc()
+
+    with get_conn() as conn:
+        rows = fetch_today_queue(conn, day)
+        if not rows:
+            rows = create_today_queue(conn, day, TODAY_LIMIT, REVIEW_TARGET)
+
+        today_clips = [
+            {
+                "id": r["id"],
+                "videoId": r["video_id"],
+                "startSec": r["start_sec"],
+                "endSec": r["end_sec"],
+                "title": r["title"],
+                "kind": r["kind"],
+            }
+            for r in rows
+        ]
+
+        done_rows = conn.execute(
+            "SELECT DISTINCT clip_id FROM reviews WHERE reviewed_at LIKE ?",
+            (f"{day}%",),
+        ).fetchall()
+        completed_clip_ids = [d["clip_id"] for d in done_rows]
+
+    return {
+        "day": day,
+        "clips": today_clips,
+        "completedClipIds": completed_clip_ids,
+    }
 
 @app.get("/clips/today")
 def get_today_clips() -> list[dict[str, Any]]:
