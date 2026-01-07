@@ -272,14 +272,14 @@ def reroll_today_one(req: RerollOneRequest):
 
     with get_conn() as conn:
         # 1) 해당 슬롯이 있는지, 그리고 new인지 확인
-        row = conn.fetchone(
+        row = conn.execute(
             """
             SELECT clip_id, kind
             FROM today_queue
             WHERE day = ? AND position = ?
             """,
             (day, req.position),
-        )
+        ).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Slot not found")
 
@@ -290,7 +290,7 @@ def reroll_today_one(req: RerollOneRequest):
 
         # 2) 새로 뽑을 후보 clip 1개 선택
         # 조건: 오늘 큐에 이미 들어간 clip 제외, 그리고 기존 clip도 제외
-        new_row = conn.fetchone(
+        new_row = conn.execute(
             """
             SELECT c.id
             FROM clips c
@@ -302,7 +302,8 @@ def reroll_today_one(req: RerollOneRequest):
             LIMIT 1
             """,
             (day, old_clip_id),
-        )
+        ).fetchone()
+
         if not new_row:
             raise HTTPException(status_code=400, detail="No available new clips to reroll")
 
