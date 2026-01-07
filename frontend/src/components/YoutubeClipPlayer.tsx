@@ -160,7 +160,7 @@ export default function YoutubeClipPlayer({ videoId, startSec, endSec }: Props) 
 
     return (
         <div>
-            <h2>YoutubeClipPayer</h2>
+            <h2>YoutubeClipPlayer</h2>
             {/* Youtube Player position */}
             <div
                 ref={containerRef}

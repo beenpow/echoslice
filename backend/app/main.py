@@ -168,6 +168,8 @@ def reroll_new_only(conn: sqlite3.Connection, day: str, limit: int) -> list[sqli
 class ReviewCreate(BaseModel):
     clipId: int
     score: int # 1 - 5
+class RerollOneRequest(BaseModel):
+    position: int
 def calc_next_review_at(score: int) -> datetime:
     if score <= 2:
         days = 1
@@ -203,6 +205,7 @@ def get_today_payload():
 
         today_clips = [
             {
+                "position": r["position"],
                 "id": r["id"],
                 "videoId": r["video_id"],
                 "startSec": r["start_sec"],
@@ -263,6 +266,61 @@ def reroll_today_new() -> list[dict[str, Any]]:
         for row in rows
     ]
 
+@app.post("/clips/today/reroll_one")
+def reroll_today_one(req: RerollOneRequest):
+    day = today_str_utc()
+
+    with get_conn() as conn:
+        # 1) 해당 슬롯이 있는지, 그리고 new인지 확인
+        row = conn.fetchone(
+            """
+            SELECT clip_id, kind
+            FROM today_queue
+            WHERE day = ? AND position = ?
+            """,
+            (day, req.position),
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Slot not found")
+
+        if row["kind"] != "new":
+            raise HTTPException(status_code=400, detail="Only 'new' slots can be rerolled")
+
+        old_clip_id = row["clip_id"]
+
+        # 2) 새로 뽑을 후보 clip 1개 선택
+        # 조건: 오늘 큐에 이미 들어간 clip 제외, 그리고 기존 clip도 제외
+        new_row = conn.fetchone(
+            """
+            SELECT c.id
+            FROM clips c
+            WHERE c.id NOT IN (
+                SELECT clip_id FROM today_queue WHERE day = ?
+            )
+            AND c.id != ?
+            ORDER BY RANDOM()
+            LIMIT 1
+            """,
+            (day, old_clip_id),
+        )
+        if not new_row:
+            raise HTTPException(status_code=400, detail="No available new clips to reroll")
+
+        new_clip_id = new_row["id"]
+
+        # 3) today_queue의 해당 position만 교체
+        conn.execute(
+            """
+            UPDATE today_queue
+            SET clip_id = ?
+            WHERE day = ? AND position = ?
+            """,
+            (new_clip_id, day, req.position),
+        )
+        conn.commit()
+
+    # 4) 간단히 OK 반환 (프론트가 /today를 다시 fetch해서 갱신)
+    return {"ok": True, "day": day, "position": req.position, "clipId": new_clip_id}
 
 @app.post("/reviews")
 def create_review(payload: ReviewCreate):
