@@ -17,18 +17,25 @@ function App() {
 
   const [rerollingPos, setRerollingPos] = useState<number | null>(null);
 
-  const loadToday = async (keepSelectedId?: number) => {
+  const loadToday = async (opts?: {keepSelectedId?: number; preferPosition?: number}) => {
     const data = await fetchToday();
+    const list = data.clips ?? [];
 
     setClips(data.clips);
     setCompletedClipId(data.completedClipIds ?? []);
 
-    const nextSelected =
-      (keepSelectedId != null && data.clips.find((c) => c.id === keepSelectedId)) ||
-      data.clips[0] ||
-      null;
+    const byPos = 
+        opts?.preferPosition != null
+            ? list.find((c) => c.position === opts.preferPosition) ?? null
+            : null;
+        
+    const byId = 
+        opts?.keepSelectedId != null
+            ? list.find((c) => c.id === opts.keepSelectedId) ?? null
+            : null;
 
-    setSelectedClip(nextSelected);
+    // priority : position(slot) -> id -> first
+    setSelectedClip(byPos ?? byId ?? list[0] ?? null);
   };
 
   useEffect(() => {
@@ -75,10 +82,16 @@ function App() {
   const handleRerollOne = async (pos: number) => {
     if (rerollingPos != null) return;
 
+    const wasViewingThisSlot = selectedClip?.position === pos;
+
     try {
       setRerollingPos(pos);
       await rerollTodayOne(pos);
-      await loadToday(selectedClip?.id);
+
+      await loadToday({
+        preferPosition: wasViewingThisSlot ? pos : undefined,
+        keepSelectedId: selectedClip?.id,
+      });
     } catch (e) {
       alert(e instanceof Error ? e.message : "Reroll failed");
     } finally {
