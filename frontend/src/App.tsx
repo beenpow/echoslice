@@ -60,6 +60,37 @@ function App() {
     if (error) return <div style={{ padding: 16 }}>Error: {error}</div>;
     if (clips.length == 0) return <div style = {{ padding: 16 }}>No clips today</div>;
 
+    const reviewClips = clips.filter((c) => c.kind === "review");
+    const newClips = clips.filter((c) => c.kind === "new");
+    const renderClipButton = (c: Clip) => {
+        const completed = completedClipIds.includes(c.id);
+        const selected = selectedClip?.id === c.id;
+
+        return(
+            <button
+                key={c.id}
+                onClick={() => setSelectedClip(c)}
+                style={{
+                    textAlign: "left",
+                    padding: 10,
+                    borderRadius: 10,
+                    border: selected ? "2px solid #2563eb" : "1px solid #ccc",
+                    cursor: "pointer",
+                    opacity: completed ? 0.5 : 1,
+                    background: selected ? "#f3f3f3" : "white",
+                    color: "#111",
+                }}
+            >
+                <div style = {{ fontWeight: 600}}>
+                    {completed ? "✅ " : ""}
+                    {c.title?.trim() ? c.title : `Clip #${c.id}`}
+                </div>
+                <div style={{ fontSize: 12, color: "#444"}}>
+                    {c.startSec}s - {c.endSec}s
+                </div>
+            </button>
+        );
+    };
     return (
         <div style={{ padding: 16 }}>
           <h1>EchoSlice</h1>
@@ -67,40 +98,33 @@ function App() {
           <div style={{ display: "flex", gap: 16 }}>
             {/* 왼쪽: 오늘 클립 리스트 */}
             <div style={{ width: 320 }}>
-              <h3>Today</h3>
-    
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {clips.map((c) => {
-                  const completed = completedClipIds.includes(c.id);
-                  const selected = selectedClip?.id === c.id;
-    
-                  return (
-                    <button
-                      key={c.id}
-                      onClick={() => setSelectedClip(c)}
-                      style={{
-                        textAlign: "left",
-                        padding: 10,
-                        borderRadius: 10,
-                        border: "1px solid #ccc",
-                        cursor: "pointer",
-                        opacity: completed ? 0.5 : 1,
-                        background: selected ? "#f3f3f3" : "white",
-                        color: "#111",
-                      }}
-                    >
-                      <div style={{ fontWeight: 600 }}>
-                        {completed ? "✅ " : ""}
-                        {c.title ? c.title : `Clip #${c.id}`}
-                      </div>
-                      <div style={{ fontSize: 12 }}>
-                        {c.startSec}s - {c.endSec}s
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
+                <h3>Today</h3>
+
+                {/* Review 섹션 */}
+                <div style={{ marginTop: 12 }}>
+                    <div style={{ fontWeight: 700, marginBottom: 8 }}>Review</div>
+                    {reviewClips.length === 0 ? (
+                    <div style={{ fontSize: 12, color: "#666" }}>No reviews today</div>
+                    ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        {reviewClips.map(renderClipButton)}
+                    </div>
+                    )}
+                </div>
+
+                {/* New 섹션 */}
+                <div style={{ marginTop: 16 }}>
+                    <div style={{ fontWeight: 700, marginBottom: 8 }}>New</div>
+                    {newClips.length === 0 ? (
+                    <div style={{ fontSize: 12, color: "#666" }}>No new clips</div>
+                    ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        {newClips.map(renderClipButton)}
+                    </div>
+                    )}
+                </div>
             </div>
+
     
             {/* 오른쪽: 플레이어 + 평점 */}
             <div style={{ flex: 1 }}>

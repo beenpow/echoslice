@@ -3,7 +3,8 @@ export type Clip = {
     videoId: string;
     startSec: number;
     endSec: number;
-    title?: string;  
+    title?: string;
+    kind: "new" | "review";
 };
 
 export type TodayResponse = {
