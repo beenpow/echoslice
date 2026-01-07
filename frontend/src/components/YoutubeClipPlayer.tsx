@@ -21,6 +21,9 @@ export default function YoutubeClipPlayer({ videoId, startSec, endSec }: Props) 
     const [isLooping, setIsLooping] = useState(true);
     const [isCCOn, setIsCCOn] = useState(true);
 
+    const [isReady, setIsReady] = useState(false);
+    const pendingCueRef = useRef<{ videoId: string } | null>(null);
+
     const handlePlayFromStart = () => {
         const player = playerRef.current;
         if (!player) return;
@@ -92,6 +95,20 @@ export default function YoutubeClipPlayer({ videoId, startSec, endSec }: Props) 
     }, [isPlaying, endSec, isLooping, startSec]);
 
     useEffect(() => {
+        const player = playerRef.current;
+        if (!player) return;
+
+        if (!isReady) {
+            pendingCueRef.current = { videoId };
+            return;
+        }
+        // Changing the video. (Not playing it)
+        player.cueVideoById(videoId);
+        // Set it as paused one.
+        setIsPlaying(false);
+    }, [videoId, isReady]);
+
+    useEffect(() => {
         const loadAndCreate = () => {
             if (!window.YT || !containerRef.current) return;
 
@@ -108,6 +125,13 @@ export default function YoutubeClipPlayer({ videoId, startSec, endSec }: Props) 
                     events: {
                         onReady: () => {
                             console.log("Player ready");
+                            setIsReady(true);
+
+                            const pending = pendingCueRef.current;
+                            if (pending && playerRef.current) {
+                                playerRef.current.cueVideoById(pending.videoId);
+                                pendingCueRef.current = null;
+                            }
                         },
                     },
                 });
