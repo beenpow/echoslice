@@ -9,7 +9,7 @@ from typing import Any
 
 TODAY_LIMIT = 5
 REVIEW_TARGET = 2
-
+MIN_UNUSED_NEW = 30  # minimum new clip stock count
 
 app = FastAPI(title="EchoSlice API", version="0.0.1")
 
@@ -73,6 +73,8 @@ def create_today_queue(conn: sqlite3.Connection, day: str, limit: int, review_ta
     review_ids = [r["id"] for r in review_rows if r["id"] not in done_set]
 
     # 2) 신규 후보: 아직 리뷰가 없는 clip
+    ensure_new_stock(conn, MIN_UNUSED_NEW)
+
     slots_left = max(0, limit - len(review_ids))
     new_rows = conn.execute(
         """
@@ -128,6 +130,7 @@ def reroll_new_only(conn: sqlite3.Connection, day: str, limit: int) -> list[sqli
     done_set = {r["clip_id"] for r in done_ids}
 
     # 5) 신규 후보 풀에서 새로 뽑기
+    ensure_new_stock(conn, MIN_UNUSED_NEW)
     needed = len(new_positions)
     new_rows = conn.execute(
         """
@@ -181,6 +184,25 @@ def calc_next_review_at(score: int) -> datetime:
         days = 14
     return datetime.now(timezone.utc) + timedelta(days=days)
 
+def ensure_new_stock(conn: sqlite3.Connection, min_unused: int):
+    row = conn.execute(
+        """
+        SELECT COUNT(*) AS cnt
+        FROM clips c
+        LEFT JOIN reviews r ON r.clip_id = c.id
+        WHERE r.clip_id IS NULL
+        """
+    ).fetchone()
+
+    unused_cnt = row["cnt"]
+
+    if unused_cnt >= min_unused:
+        return
+    needed = max(0, min_unused - unused_cnt)
+    supply_clips(conn, needed)
+
+def supply_clips(conn: sqlite3.Connection, needed: int):
+    print(f"[supply_clips] need to supply {needed} new clips (stub)")
 
 @app.on_event("startup")
 def on_startup():
@@ -289,12 +311,17 @@ def reroll_today_one(req: RerollOneRequest):
         old_clip_id = row["clip_id"]
 
         # 2) 새로 뽑을 후보 clip 1개 선택
+        # ensure new stock before reroll
+        ensure_new_stock(conn, MIN_UNUSED_NEW)
+        
         # 조건: 오늘 큐에 이미 들어간 clip 제외, 그리고 기존 clip도 제외
         new_row = conn.execute(
             """
             SELECT c.id
             FROM clips c
-            WHERE c.id NOT IN (
+            LEFT JOIN reviews r ON r.clip_id = c.id
+            WHERE r.clip_id IS NULL
+            AND c.id NOT IN (
                 SELECT clip_id FROM today_queue WHERE day = ?
             )
             AND c.id != ?

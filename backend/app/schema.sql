@@ -4,8 +4,8 @@
 CREATE TABLE IF NOT EXISTS clips (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   video_id TEXT NOT NULL,
-  start_sec INTEGER NOT NULL,
-  end_sec INTEGER NOT NULL,
+  start_sec REAL NOT NULL,
+  end_sec REAL NOT NULL,
   title TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
