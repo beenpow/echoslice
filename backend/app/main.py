@@ -24,6 +24,10 @@ SUPPLY_TALKS_PER_ROUND = 6    # 한 라운드에서 시도할 talk 수
 SUPPLY_MAX_ROUNDS = 6         # 무한루프 방지
 SUPPLY_SLEEP_SEC = 0.0        # 과도 호출 방지(필요시 0.2 같은 값)
 
+DEFAULT_SUPPLY_PER_TALK = 3
+DEFAULT_SUPPLY_MODEL = "gemini-2.5-flash"
+DEFAULT_SUPPLY_MAX_CANDIDATES = 18
+
 app = FastAPI(title="EchoSlice API", version="0.0.1")
 
 # Frontend dev server(CORS)
@@ -201,24 +205,18 @@ def calc_next_review_at(score: int) -> datetime:
     return datetime.now(timezone.utc) + timedelta(days=days)
 
 def ensure_new_stock(conn: sqlite3.Connection, min_unused: int):
-    row = conn.execute(
-        """
-        SELECT COUNT(*) AS cnt
-        FROM clips c
-        LEFT JOIN reviews r ON r.clip_id = c.id
-        WHERE r.clip_id IS NULL
-        """
-    ).fetchone()
-
-    unused_cnt = row["cnt"]
-
+    unused_cnt = count_unreviewed_clips(conn)
     if unused_cnt >= min_unused:
         return
-    needed = max(0, min_unused - unused_cnt)
-    supply_clips(conn, needed)
 
-def supply_clips(conn: sqlite3.Connection, needed: int):
-    print(f"[supply_clips] need to supply {needed} new clips (stub)")
+    # ensure_new_clips는 "최종 최소 개수 보장"으로 쓰는 게 가장 깔끔
+    ensure_new_clips(
+        conn=conn,
+        min_needed=min_unused,
+        per_talk=DEFAULT_SUPPLY_PER_TALK,
+        model=DEFAULT_SUPPLY_MODEL,
+        max_candidates=DEFAULT_SUPPLY_MAX_CANDIDATES,
+    )
 
 def ensure_new_clips(
     conn,
