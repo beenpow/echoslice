@@ -9,7 +9,7 @@ from typing import Any
 
 from app.ted_popular import fetch_popular_slugs
 from app.ted_talk_page import fetch_talk_next_data
-
+from app.ted_extract import extract_youtube_id, extract_transcript_cues
 
 TODAY_LIMIT = 5
 REVIEW_TARGET = 2
@@ -217,6 +217,21 @@ def debug_ted_popular(page: int = 0):
 def debug_ted_talk_next_data(slug: str):
     data = fetch_talk_next_data(slug)
     return {"slug": slug, "topKeys": list(data.keys())}
+
+@app.get("/debug/ted/talk_extract")
+def debug_ted_talk_extract(slug: str):
+    data = fetch_talk_next_data(slug)
+    youtube_id = extract_youtube_id(data)
+    cues = extract_transcript_cues(data)
+
+    preview = cues[:10]
+
+    return {
+        "slug": slug,
+        "youtubeId": youtube_id,
+        "cueCount": len(cues),
+        "cuePreview": preview,
+    }
 
 @app.on_event("startup")
 def on_startup():
