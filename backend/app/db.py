@@ -27,3 +27,29 @@ def init_db() -> None:
         conn.executescript(schema_sql)
         conn.commit()
         migrate_db(conn)
+
+def count_unreviewed_clips(conn) -> int:
+    row = conn.execute(
+        """
+        SELECT COUNT(*)
+        FROM clips c
+        LEFT JOIN reviews r ON r.clip_id = c.id
+        WHERE r.id IS NULL
+        """
+    ).fetchone()
+    return int(row[0]) if row else 0
+
+
+def fetch_unreviewed_clip_ids(conn, limit: int) -> list[int]:
+    rows = conn.execute(
+        """
+        SELECT c.id
+        FROM clips c
+        LEFT JOIN reviews r ON r.clip_id = c.id
+        WHERE r.id IS NULL
+        ORDER BY c.id DESC
+        LIMIT ?
+        """,
+        (limit,),
+    ).fetchall()
+    return [int(r[0]) for r in rows]

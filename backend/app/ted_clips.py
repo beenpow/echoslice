@@ -218,3 +218,66 @@ def insert_clip_candidates(
 
     conn.commit()
     return inserted
+
+
+def _fetch_existing_ranges(conn, video_id: str) -> list[tuple[int, int]]:
+    rows = conn.execute(
+        "SELECT startSec, endSec FROM clips WHERE videoId = ? ORDER BY startSec",
+        (video_id,),
+    ).fetchall()
+    return [(int(r[0]), int(r[1])) for r in rows]
+
+def _overlaps(a_start: int, a_end: int, b_start: int, b_end: int) -> bool:
+    # 겹침 조건: a_start < b_end AND a_end > b_start
+    return a_start < b_end and a_end > b_start
+
+def _overlaps_any(ranges: list[tuple[int, int]], start: int, end: int) -> bool:
+    for s, e in ranges:
+        if _overlaps(start, end, s, e):
+            return True
+    return False
+
+def insert_clip_candidates_no_overlap(conn, candidates) -> int:
+    """
+    candidates 중에서:
+    - DB에 이미 있는 구간과 겹치면 스킵
+    - 같은 배치 내에서도 서로 겹치면 스킵
+    그 외만 insert. (동일 start/end 중복은 기존 UNIQUE/insert 로직이 추가로 막아도 OK)
+    """
+    inserted = 0
+
+    # videoId별로 기존 ranges를 한 번만 가져오고, 배치에서 채택된 ranges도 여기에 계속 추가
+    cache: dict[str, list[tuple[int, int]]] = {}
+
+    for c in candidates:
+        vid = c.video_id
+        start = int(c.start_sec)
+        end = int(c.end_sec)
+
+        if vid not in cache:
+            cache[vid] = _fetch_existing_ranges(conn, vid)
+
+        # DB existing + already accepted in this run 모두 포함해서 overlap 체크
+        if _overlaps_any(cache[vid], start, end):
+            continue
+
+        # 여기까지 통과면 insert 시도
+        # (너희 기존 insert_clip_candidate/insert_clip_candidates 로직 재사용해도 됨)
+        try:
+            conn.execute(
+                """
+                INSERT INTO clips (videoId, title, startSec, endSec)
+                VALUES (?, ?, ?, ?)
+                """,
+                (c.video_id, c.title, start, end),
+            )
+            inserted += 1
+
+            # 방금 넣은 구간을 cache에 추가해서 같은 배치 내 오버랩도 방지
+            cache[vid].append((start, end))
+        except Exception:
+            # UNIQUE 충돌 같은 건 그냥 스킵
+            continue
+
+    conn.commit()
+    return inserted

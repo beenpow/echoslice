@@ -19,6 +19,11 @@ TODAY_LIMIT = 5
 REVIEW_TARGET = 2
 MIN_UNUSED_NEW = 30  # minimum new clip stock count
 
+SUPPLY_MAX_PAGE = 308         # popular page 7312/24 = 308
+SUPPLY_TALKS_PER_ROUND = 6    # 한 라운드에서 시도할 talk 수
+SUPPLY_MAX_ROUNDS = 6         # 무한루프 방지
+SUPPLY_SLEEP_SEC = 0.0        # 과도 호출 방지(필요시 0.2 같은 값)
+
 app = FastAPI(title="EchoSlice API", version="0.0.1")
 
 # Frontend dev server(CORS)
@@ -81,9 +86,12 @@ def create_today_queue(conn: sqlite3.Connection, day: str, limit: int, review_ta
     review_ids = [r["id"] for r in review_rows if r["id"] not in done_set]
 
     # 2) 신규 후보: 아직 리뷰가 없는 clip
-    ensure_new_stock(conn, MIN_UNUSED_NEW)
-
     slots_left = max(0, limit - len(review_ids))
+
+    # 핵심: (기본 재고 MIN_UNUSED_NEW)와 (오늘 필요한 slots_left) 중 더 큰 값만큼은 확보
+    min_needed = max(MIN_UNUSED_NEW, slots_left)
+    ensure_new_stock(conn, min_needed)
+
     new_rows = conn.execute(
         """
         SELECT c.id
@@ -211,6 +219,107 @@ def ensure_new_stock(conn: sqlite3.Connection, min_unused: int):
 
 def supply_clips(conn: sqlite3.Connection, needed: int):
     print(f"[supply_clips] need to supply {needed} new clips (stub)")
+
+def ensure_new_clips(
+    conn,
+    min_needed: int,
+    per_talk: int,
+    model: str,
+    max_candidates: int,
+) -> dict:
+    """
+    DB에 unreviewed(new) clip이 min_needed개 이상이 되도록,
+    TED popular를 랜덤 page에서 돌며 supply를 반복한다.
+    transcript/youtubeId 없으면 그 talk는 스킵한다.
+    """
+    before = count_unreviewed_clips(conn)
+    target = before + max(0, min_needed)
+
+    rounds = 0
+    total_inserted = 0
+    attempted_talks = 0
+    skipped_talks = 0
+    errors = 0
+
+    while count_unreviewed_clips(conn) < target and rounds < SUPPLY_MAX_ROUNDS:
+        rounds += 1
+        page = random.randint(0, SUPPLY_MAX_PAGE)
+
+        # page에서 후보 슬러그 가져오기
+        all_slugs = ted_popular.fetch_popular_slugs(page=page)  # 너네 함수명에 맞춰서
+        random.shuffle(all_slugs)
+        slugs = all_slugs[:SUPPLY_TALKS_PER_ROUND]
+
+        for slug in slugs:
+            attempted_talks += 1
+            try:
+                inserted = supply_one_talk_ai(
+                    conn=conn,
+                    slug=slug,
+                    per_talk=per_talk,
+                    model=model,
+                    max_candidates=max_candidates,
+                )
+                if inserted == 0:
+                    skipped_talks += 1
+                total_inserted += inserted
+
+                if count_unreviewed_clips(conn) >= target:
+                    break
+
+                if SUPPLY_SLEEP_SEC > 0:
+                    time.sleep(SUPPLY_SLEEP_SEC)
+
+            except Exception:
+                errors += 1
+                # 한 talk 에러는 전체 공급을 멈추지 않고 계속
+                continue
+
+        if count_unreviewed_clips(conn) >= target:
+            break
+
+    after = count_unreviewed_clips(conn)
+    return {
+        "beforeNew": before,
+        "afterNew": after,
+        "requestedAdd": min_needed,
+        "actuallyAdded": max(0, after - before),
+        "rounds": rounds,
+        "attemptedTalks": attempted_talks,
+        "skippedTalks": skipped_talks,
+        "errors": errors,
+        "model": model,
+        "maxCandidates": max_candidates,
+        "perTalk": per_talk,
+    }
+
+def supply_one_talk_ai(
+    conn,
+    slug: str,
+    per_talk: int,
+    model: str,
+    max_candidates: int,
+) -> int:
+    """
+    slug 하나에 대해:
+    - talk 페이지에서 youtubeId + transcript cues 추출
+    - 후보 max_candidates 만들고
+    - Gemini로 per_talk개 pick
+    - insert_clip_candidates_no_overlap로 겹침 없이 insert
+    """
+    # 1) AI로 클립 후보 pick
+    #    반환이 ClipCandidate 리스트라고 가정 (video_id/start_sec/end_sec/title 포함)
+    picked, _meta = ted_ai.generate_ai_clips_for_slug(
+        slug=slug,
+        per_talk=per_talk,
+        model=model,
+        max_candidates=max_candidates,
+    )
+
+    # 2) DB insert (겹침 금지)
+    inserted = ted_clips.insert_clip_candidates_no_overlap(conn, picked)
+    return inserted
+
 
 @app.get("/debug/ted/popular")
 def debug_ted_popular(page: int = 0):

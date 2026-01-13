@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import os
 import random
+import time
+import re
 from typing import Any
 
 from app.ted_talk_page import fetch_talk_next_data
@@ -12,6 +14,8 @@ from app.ted_clips import (
     build_clip_candidates_from_cues,
     generate_clips_for_slug,
 )
+
+MAX_TEXT_CHARS = 280  # 튜닝 가능
 
 def _try_import_genai():
     try:
@@ -40,6 +44,22 @@ def _safe_title(next_data: dict[str, Any], fallback: str) -> str:
     except Exception:
         pass
     return fallback
+
+def _extract_retry_delay_seconds(msg: str) -> int | None:
+    """
+    Gemini 429 에러 메시지에서 retryDelay(예: '52s' 또는 'Please retry in 52.3s')를 추출한다.
+    """
+    # case 1: "'retryDelay': '52s'"
+    m = re.search(r"retryDelay'\s*:\s*'(\d+)s'", msg)
+    if m:
+        return int(m.group(1))
+
+    # case 2: "Please retry in 52.363s."
+    m = re.search(r"retry in\s+(\d+)(?:\.\d+)?s", msg, flags=re.IGNORECASE)
+    if m:
+        return int(m.group(1))
+
+    return None
 
 def _window_text(cues: list[dict[str, Any]], start_sec: int, end_sec: int) -> str:
     parts: list[str] = []
@@ -200,22 +220,42 @@ def generate_ai_clips_for_slug(
 
         cand_payload: list[dict[str, Any]] = []
         for i, c in enumerate(rough):
+            text = _window_text(cues, c.start_sec, c.end_sec)
+            if len(text) > MAX_TEXT_CHARS:
+                text = text[:MAX_TEXT_CHARS].rstrip() + "…"
+
             cand_payload.append(
                 {
                     "index": i,
                     "startSec": c.start_sec,
                     "endSec": c.end_sec,
-                    "text": _window_text(cues, c.start_sec, c.end_sec),
+                    "text": text,
                 }
             )
 
-        picked_indices, picked_meta = _gemini_pick_indices(
-            model=model,
-            title=title,
-            video_id=youtube_id,
-            candidates=cand_payload,
-            k=per_talk,
-        )
+        try:
+            picked_indices, picked_meta = _gemini_pick_indices(
+                model=model,
+                title=title,
+                video_id=youtube_id,
+                candidates=cand_payload,
+                k=per_talk,
+            )
+        except Exception as e:
+            msg = str(e)
+            # 429 RESOURCE_EXHAUSTED면 retryDelay만큼 기다렸다가 1회 재시도
+            if ("429" in msg) or ("RESOURCE_EXHAUSTED" in msg):
+                delay = _extract_retry_delay_seconds(msg) or 2
+                time.sleep(min(delay, 10))  # 너무 길게는 안 기다림 (최대 10초)
+                picked_indices, picked_meta = _gemini_pick_indices(
+                    model=model,
+                    title=title,
+                    video_id=youtube_id,
+                    candidates=cand_payload,
+                    k=per_talk,
+                )
+            else:
+                raise
 
         meta["picked"] = picked_indices
         meta["gemini"] = picked_meta
