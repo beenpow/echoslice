@@ -6,6 +6,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import sqlite3
 from typing import Any
+from app.ted_popular import fetch_popular_slugs
+
 
 TODAY_LIMIT = 5
 REVIEW_TARGET = 2
@@ -204,6 +206,11 @@ def ensure_new_stock(conn: sqlite3.Connection, min_unused: int):
 def supply_clips(conn: sqlite3.Connection, needed: int):
     print(f"[supply_clips] need to supply {needed} new clips (stub)")
 
+@app.get("/debug/ted/popular")
+def debug_ted_popular(page: int = 0):
+    slugs = fetch_popular_slugs(page=page)
+    return {"page" : page, "count": len(slugs), "slugs": slugs}
+
 @app.on_event("startup")
 def on_startup():
     init_db()
@@ -313,7 +320,7 @@ def reroll_today_one(req: RerollOneRequest):
         # 2) 새로 뽑을 후보 clip 1개 선택
         # ensure new stock before reroll
         ensure_new_stock(conn, MIN_UNUSED_NEW)
-        
+
         # 조건: 오늘 큐에 이미 들어간 clip 제외, 그리고 기존 clip도 제외
         new_row = conn.execute(
             """
