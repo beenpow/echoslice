@@ -5,12 +5,13 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import sqlite3
+import random
 from typing import Any
 
 from app.ted_popular import fetch_popular_slugs
 from app.ted_talk_page import fetch_talk_next_data
 from app.ted_extract import extract_youtube_id, extract_transcript_cues
-from app.ted_clips import generate_clips_for_slug, insert_clip_candidates
+from app.ted_clips import generate_clips_for_slug, insert_clip_candidates_no_overlap
 from app.ted_ai import generate_ai_clips_for_slug
 
 
@@ -278,7 +279,7 @@ def ted_supply_ai(
     page: int = 0,
     talks: int = 5,
     perTalk: int = 3,
-    model: str = "gemini-2.0-flash",
+    model: str = "gemini-2.5-flash",
     maxCandidates: int = 18,
 ):
     """
@@ -294,7 +295,8 @@ def ted_supply_ai(
     if maxCandidates < perTalk or maxCandidates > 60:
         raise HTTPException(status_code=400, detail="maxCandidates must be perTalk..60")
 
-    slugs = fetch_popular_slugs(page=page)[:talks]
+    all_slugs = fetch_popular_slugs(page=page)
+    slugs = random.sample(all_slugs, k=min(talks, len(all_slugs)))
 
     created = 0
     attempted = 0
@@ -309,7 +311,7 @@ def ted_supply_ai(
                 model=model,
                 max_candidates=maxCandidates,
             )
-            ins = insert_clip_candidates(conn, candidates)
+            ins = insert_clip_candidates_no_overlap(conn, candidates)
             created += ins
 
             details.append(
