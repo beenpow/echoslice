@@ -11,6 +11,7 @@ from app.ted_popular import fetch_popular_slugs
 from app.ted_talk_page import fetch_talk_next_data
 from app.ted_extract import extract_youtube_id, extract_transcript_cues
 from app.ted_clips import generate_clips_for_slug, insert_clip_candidates
+from app.ted_ai import generate_ai_clips_for_slug
 
 
 TODAY_LIMIT = 5
@@ -266,6 +267,67 @@ def ted_supply(page: int = 0, talks: int = 5, perTalk: int = 3):
         "page": page,
         "talks": talks,
         "perTalk": perTalk,
+        "attempted": attempted,
+        "created": created,
+        "details": details,
+    }
+
+
+@app.get("/ted/supply_ai")
+def ted_supply_ai(
+    page: int = 0,
+    talks: int = 5,
+    perTalk: int = 3,
+    model: str = "gemini-2.0-flash",
+    maxCandidates: int = 18,
+):
+    """
+    Step14:
+    - 후보 구간은 랜덤으로 많이 만들고(maxCandidates)
+    - Gemini가 그 중 perTalk개만 pick
+    - Gemini 실패하면 ted_clips.generate_clips_for_slug로 fallback
+    """
+    if talks <= 0 or talks > 30:
+        raise HTTPException(status_code=400, detail="talks must be 1..30")
+    if perTalk <= 0 or perTalk > 10:
+        raise HTTPException(status_code=400, detail="perTalk must be 1..10")
+    if maxCandidates < perTalk or maxCandidates > 60:
+        raise HTTPException(status_code=400, detail="maxCandidates must be perTalk..60")
+
+    slugs = fetch_popular_slugs(page=page)[:talks]
+
+    created = 0
+    attempted = 0
+    details = []
+
+    with get_conn() as conn:
+        for slug in slugs:
+            attempted += 1
+            candidates, meta = generate_ai_clips_for_slug(
+                slug=slug,
+                per_talk=perTalk,
+                model=model,
+                max_candidates=maxCandidates,
+            )
+            ins = insert_clip_candidates(conn, candidates)
+            created += ins
+
+            details.append(
+                {
+                    "slug": slug,
+                    "mode": meta.get("mode"),
+                    "fallbackReason": meta.get("fallbackReason"),
+                    "generated": len(candidates),
+                    "inserted": ins,
+                }
+            )
+
+    return {
+        "page": page,
+        "talks": talks,
+        "perTalk": perTalk,
+        "model": model,
+        "maxCandidates": maxCandidates,
         "attempted": attempted,
         "created": created,
         "details": details,
