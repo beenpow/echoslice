@@ -10,6 +10,8 @@ from typing import Any
 from app.ted_popular import fetch_popular_slugs
 from app.ted_talk_page import fetch_talk_next_data
 from app.ted_extract import extract_youtube_id, extract_transcript_cues
+from app.ted_clips import generate_clips_for_slug, insert_clip_candidates
+
 
 TODAY_LIMIT = 5
 REVIEW_TARGET = 2
@@ -232,6 +234,43 @@ def debug_ted_talk_extract(slug: str):
         "cueCount": len(cues),
         "cuePreview": preview,
     }
+
+@app.get("/ted/supply")
+def ted_supply(page: int = 0, talks: int = 5, perTalk: int = 3):
+    """
+    page: TED popular page index
+    talks: 몇 개 talk를 처리할지
+    perTalk: talk당 몇 개 clip 만들지
+    """
+    if talks <= 0 or talks > 30:
+        raise HTTPException(status_code=400, detail="talks must be 1..30")
+    if perTalk <= 0 or perTalk > 10:
+        raise HTTPException(status_code=400, detail="perTalk must be 1..10")
+
+    slugs = fetch_popular_slugs(page=page)
+    slugs = slugs[:talks]
+
+    created = 0
+    attempted = 0
+    details = []
+
+    with get_conn() as conn:
+        for slug in slugs:
+            attempted += 1
+            candidates = generate_clips_for_slug(slug, per_talk=perTalk)
+            ins = insert_clip_candidates(conn, candidates)
+            created += ins
+            details.append({"slug": slug, "generated": len(candidates), "inserted": ins})
+
+    return {
+        "page": page,
+        "talks": talks,
+        "perTalk": perTalk,
+        "attempted": attempted,
+        "created": created,
+        "details": details,
+    }
+
 
 @app.on_event("startup")
 def on_startup():
