@@ -6,7 +6,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import sqlite3
 from typing import Any
+
 from app.ted_popular import fetch_popular_slugs
+from app.ted_talk_page import fetch_talk_next_data
 
 
 TODAY_LIMIT = 5
@@ -210,6 +212,11 @@ def supply_clips(conn: sqlite3.Connection, needed: int):
 def debug_ted_popular(page: int = 0):
     slugs = fetch_popular_slugs(page=page)
     return {"page" : page, "count": len(slugs), "slugs": slugs}
+
+@app.get("/debug/ted/talk_next_data")
+def debug_ted_talk_next_data(slug: str):
+    data = fetch_talk_next_data(slug)
+    return {"slug": slug, "topKeys": list(data.keys())}
 
 @app.on_event("startup")
 def on_startup():
