@@ -7,7 +7,6 @@ import time
 import re
 from typing import Any
 from app.db import gemini_calls_today, log_gemini_call
-from gemini_client import call_gemini_raw
 from app.ted_talk_page import fetch_talk_next_data
 from app.ted_extract import extract_youtube_id, extract_transcript_cues
 from app.ted_clips import (
@@ -232,6 +231,7 @@ def is_sentence_start_cue(text: str) -> bool:
 
 def generate_ai_clips_for_slug(
     slug: str,
+    conn=None,
     per_talk: int = 3,
     model: str = "gemini-2.5-flash",
     max_candidates: int = 18,
@@ -265,6 +265,13 @@ def generate_ai_clips_for_slug(
 
         cues = [c for c in cues if isinstance(c, dict)]
         cues.sort(key=lambda c: float(c.get("tSec", 0.0)))
+
+        print("ALL CUES ###########")
+        for i, c in enumerate(cues):
+            t = float(c.get("tSec", 0.0))
+            text = c.get("text", "").replace("\n", " ").strip()
+            preview = text[:120] + ("…" if len(text) > 120 else "")
+            print(f"[{i:03d}] tSec={t:8.3f} | {preview}")
 
         # Printing all selected cue elements
         sentence_cues = [
@@ -318,8 +325,8 @@ def generate_ai_clips_for_slug(
             )
 
         try:
-            print("going to sleep for 60 seconds")
-            time.sleep(60)
+            print("going to sleep for 5 seconds")
+            time.sleep(5)
             start_ts = time.time()
             picked_indices, picked_meta = _gemini_pick_indices_safe(
                 conn=conn,

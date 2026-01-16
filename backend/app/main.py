@@ -7,6 +7,7 @@ from pydantic import BaseModel
 import sqlite3
 import random
 import time
+import os
 from typing import Any
 from app.ted_popular import fetch_popular_slugs
 from app.ted_talk_page import fetch_talk_next_data
@@ -17,7 +18,7 @@ from app.ted_ai import generate_ai_clips_for_slug
 
 TODAY_LIMIT = 5
 REVIEW_TARGET = 2
-MIN_UNUSED_NEW = 30  # minimum new clip stock count
+MIN_UNUSED_NEW = 6  # 30 minimum new clip stock count
 
 SUPPLY_MAX_PAGE = 308         # popular page 7312/24 = 308
 SUPPLY_TALKS_PER_ROUND = 6    # 한 라운드에서 시도할 talk 수
@@ -31,7 +32,10 @@ DEFAULT_SUPPLY_MAX_CANDIDATES = 18
 SLUG_COOLDOWN_SEC = 60 * 60  # 1시간
 _slug_last_tried: dict[str, float] = {}
 
-SUPPLY_GLOBAL_TIMEOUT_SEC = 20 * 5 * 4# AI 한번당 12 ~ 20초 * 5개 talk
+SUPPLY_GLOBAL_TIMEOUT_SEC = 60 * 5# (AI 한번당 12 ~ 20초 + 15s sleep)* 5개 talk
+
+k = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or ""
+print("[Gemini] key suffix:", k[-6:] if k else "NONE")
 
 app = FastAPI(title="EchoSlice API", version="0.0.1")
 
