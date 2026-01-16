@@ -337,6 +337,7 @@ def supply_one_talk_ai(
     #    반환이 ClipCandidate 리스트라고 가정 (video_id/start_sec/end_sec/title 포함)
     picked, meta = generate_ai_clips_for_slug(
         slug=slug,
+        conn=conn,
         per_talk=per_talk,
         model=model,
         max_candidates=max_candidates,
@@ -451,10 +452,12 @@ def ted_supply_ai(
             attempted += 1
             candidates, meta = generate_ai_clips_for_slug(
                 slug=slug,
+                conn=conn,
                 per_talk=perTalk,
                 model=model,
                 max_candidates=maxCandidates,
             )
+
             source = meta.get("mode", "unknown")  # "ai" or "fallback"
             ins = insert_clip_candidates_no_overlap(conn, candidates, talk_slug=slug, source=source)
             created += ins

@@ -6,7 +6,8 @@ import random
 import time
 import re
 from typing import Any
-
+from app.db import gemini_calls_today, log_gemini_call
+from gemini_client import call_gemini_raw
 from app.ted_talk_page import fetch_talk_next_data
 from app.ted_extract import extract_youtube_id, extract_transcript_cues
 from app.ted_clips import (
@@ -16,6 +17,10 @@ from app.ted_clips import (
 )
 
 MAX_TEXT_CHARS = 280  # 튜닝 가능
+GEMINI_DAILY_LIMIT = 50
+
+class GeminiDailyLimitExceeded(RuntimeError):
+    pass
 
 def _try_import_genai():
     try:
@@ -75,6 +80,37 @@ def _window_text(cues: list[dict[str, Any]], start_sec: int, end_sec: int) -> st
         if isinstance(text, str) and text.strip():
             parts.append(text.strip())
     return " ".join(parts).strip()
+
+def _gemini_pick_indices_safe(
+    *,
+    conn,
+    reason: str,
+    model: str,
+    title: str,
+    video_id: str,
+    candidates: list[dict[str, Any]],
+    k: int,
+) -> tuple[list[int], dict[str, Any]]:
+    """서버 레벨 비용 안전장치: 오늘 Gemini 호출 횟수 하드 리밋."""
+    if conn is not None:
+        used = gemini_calls_today(conn)
+        if used >= GEMINI_DAILY_LIMIT:
+            raise GeminiDailyLimitExceeded(
+                f"Gemini daily limit reached ({used}/{GEMINI_DAILY_LIMIT})"
+            )
+
+    indices, meta = _gemini_pick_indices(
+        model=model,
+        title=title,
+        video_id=video_id,
+        candidates=candidates,
+        k=k,
+    )
+
+    if conn is not None:
+        log_gemini_call(conn, reason)
+
+    return indices, meta
 
 def _gemini_pick_indices(
     *,
@@ -285,7 +321,9 @@ def generate_ai_clips_for_slug(
             print("going to sleep for 60 seconds")
             time.sleep(60)
             start_ts = time.time()
-            picked_indices, picked_meta = _gemini_pick_indices(
+            picked_indices, picked_meta = _gemini_pick_indices_safe(
+                conn=conn,
+                reason=f"pick_indices:{slug}",
                 model=model,
                 title=title,
                 video_id=youtube_id,
@@ -310,6 +348,11 @@ def generate_ai_clips_for_slug(
                 )
             else:
                 raise
+        except GeminiDailyLimitExceeded as e:
+            meta["mode"] = "fallback"
+            meta["fallbackReason"] = f"gemini_daily_limit: {e}"
+            return generate_clips_for_slug(slug, per_talk=per_talk, target_sec=target_sec), meta
+
 
         meta["picked"] = picked_indices
         meta["gemini"] = picked_meta

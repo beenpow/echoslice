@@ -21,6 +21,21 @@ def migrate_db(conn: sqlite3.Connection) -> None:
         conn.execute("UPDATE today_queue SET kind = 'new' WHERE kind IS NULL OR kind = '';")
         conn.commit()
 
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS gemini_calls (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          reason TEXT
+        );
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_gemini_calls_created_at ON gemini_calls(created_at);"
+    )
+    conn.commit()
+
+
 def init_db() -> None:
     schema_sql = SCHEMA_PATH.read_text(encoding="utf-8")
     with get_conn() as conn:
@@ -53,3 +68,26 @@ def fetch_unreviewed_clip_ids(conn, limit: int) -> list[int]:
         (limit,),
     ).fetchall()
     return [int(r[0]) for r in rows]
+
+# -----------------------------
+# Gemini API usage guard helpers
+# -----------------------------
+
+def gemini_calls_today(conn: sqlite3.Connection) -> int:
+    """Local-time 기준 오늘 gemini 호출 횟수."""
+    row = conn.execute(
+        """
+        SELECT COUNT(*)
+        FROM gemini_calls
+        WHERE DATE(created_at, 'localtime') = DATE('now', 'localtime')
+        """
+    ).fetchone()
+    return int(row[0]) if row else 0
+
+
+def log_gemini_call(conn: sqlite3.Connection, reason: str) -> None:
+    conn.execute(
+        "INSERT INTO gemini_calls (reason) VALUES (?);",
+        (reason,),
+    )
+    conn.commit()

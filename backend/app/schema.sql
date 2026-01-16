@@ -30,7 +30,12 @@ CREATE TABLE IF NOT EXISTS today_queue (
   PRIMARY KEY (day, position),
   FOREIGN KEY (clip_id) REFERENCES clips(id)
 );
-
+CREATE TABLE IF NOT EXISTS gemini_calls (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    reason TEXT,
+    created_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_gemini_calls_created_at ON gemini_calls(created_at);
 CREATE INDEX IF NOT EXISTS idx_today_queue_day ON today_queue(day);
 CREATE INDEX IF NOT EXISTS idx_reviews_next_review_at ON reviews(next_review_at);
 CREATE INDEX IF NOT EXISTS idx_reviews_clip_id ON reviews(clip_id);
