@@ -7,6 +7,8 @@ CREATE TABLE IF NOT EXISTS clips (
   start_sec REAL NOT NULL,
   end_sec REAL NOT NULL,
   title TEXT,
+  talk_slug TEXT,
+  source TEXT NOT NULL DEFAULT 'unknown',
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -30,10 +32,7 @@ CREATE TABLE IF NOT EXISTS today_queue (
 );
 
 CREATE INDEX IF NOT EXISTS idx_today_queue_day ON today_queue(day);
-
-
 CREATE INDEX IF NOT EXISTS idx_reviews_next_review_at ON reviews(next_review_at);
 CREATE INDEX IF NOT EXISTS idx_reviews_clip_id ON reviews(clip_id);
-
 CREATE UNIQUE INDEX IF NOT EXISTS uq_clips_video_time
 ON clips(video_id, start_sec, end_sec);

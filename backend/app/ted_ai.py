@@ -167,6 +167,33 @@ def _gemini_pick_indices(
 
     return indices, {"selected": selected}
 
+import re
+
+def is_sentence_start_cue(text: str) -> bool:
+    if not text:
+        return False
+
+    text = text.strip()
+
+    # 1) 대문자로 시작
+    if not text[0].isupper():
+        return False
+
+    # 2) 접속사/후치 접속어로 시작하는 것 제거
+    bad_starts = (
+        "And ", "But ", "So ", "Or ", "Because ",
+        "And\n", "But\n", "So\n",
+    )
+    for b in bad_starts:
+        if text.startswith(b):
+            return False
+
+    # 3) 너무 짧은 조각 제거
+    if len(text) < 15:
+        return False
+
+    return True
+
 def generate_ai_clips_for_slug(
     slug: str,
     per_talk: int = 3,
@@ -182,13 +209,14 @@ def generate_ai_clips_for_slug(
         "perTalk": per_talk,
         "maxCandidates": max_candidates,
     }
-
+    print("generate_ai_clips_for_slug")
     try:
         next_data = fetch_talk_next_data(slug, timeout_sec=timeout_sec)
         youtube_id = extract_youtube_id(next_data)
         if not youtube_id:
             meta["mode"] = "fallback"
             meta["fallbackReason"] = "no_youtube_id"
+            print("generate_ai_clips_for_slug: no youtubeId")
             return generate_clips_for_slug(slug, per_talk=per_talk, target_sec=target_sec), meta
 
         title = _safe_title(next_data, fallback=slug)
@@ -196,15 +224,35 @@ def generate_ai_clips_for_slug(
         if not cues:
             meta["mode"] = "fallback"
             meta["fallbackReason"] = "no_cues"
+            print("generate_ai_clips_for_slug: no cues")
             return generate_clips_for_slug(slug, per_talk=per_talk, target_sec=target_sec), meta
 
         cues = [c for c in cues if isinstance(c, dict)]
         cues.sort(key=lambda c: float(c.get("tSec", 0.0)))
 
+        # Printing all selected cue elements
+        sentence_cues = [
+            c for c in cues
+            if is_sentence_start_cue(c.get("text", ""))
+        ]
+
+        # fallback: 너무 적으면 전체 cues 사용
+        if len(sentence_cues) >= per_talk * 2:
+            cues_for_build = sentence_cues
+        else:
+            cues_for_build = cues
+
+        print("GOOD QUALITY CUES ###########")
+        for i, c in enumerate(cues_for_build):
+            t = float(c.get("tSec", 0.0))
+            text = c.get("text", "").replace("\n", " ").strip()
+            preview = text[:120] + ("…" if len(text) > 120 else "")
+            print(f"[{i:03d}] tSec={t:8.3f} | {preview}")
+
         seed = random.randint(1, 1_000_000_000)
         rough = build_clip_candidates_from_cues(
             video_id=youtube_id,
-            cues=cues,
+            cues=cues_for_build,
             title=title,
             per_talk=max_candidates,
             target_sec=target_sec,
@@ -220,7 +268,7 @@ def generate_ai_clips_for_slug(
 
         cand_payload: list[dict[str, Any]] = []
         for i, c in enumerate(rough):
-            text = _window_text(cues, c.start_sec, c.end_sec)
+            text = _window_text(cues_for_build, c.start_sec, c.end_sec)
             if len(text) > MAX_TEXT_CHARS:
                 text = text[:MAX_TEXT_CHARS].rstrip() + "…"
 
@@ -234,6 +282,9 @@ def generate_ai_clips_for_slug(
             )
 
         try:
+            print("going to sleep for 60 seconds")
+            time.sleep(60)
+            start_ts = time.time()
             picked_indices, picked_meta = _gemini_pick_indices(
                 model=model,
                 title=title,
@@ -241,6 +292,9 @@ def generate_ai_clips_for_slug(
                 candidates=cand_payload,
                 k=per_talk,
             )
+            elapsed_ts = time.time() - start_ts
+            print("time took to _gemini_pick_indices : " + str(elapsed_ts))
+            print("generate_ai_clips_for_slug: 5")
         except Exception as e:
             msg = str(e)
             # 429 RESOURCE_EXHAUSTED면 retryDelay만큼 기다렸다가 1회 재시도

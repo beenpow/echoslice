@@ -1,13 +1,13 @@
 from app.db import init_db, DB_PATH
-from app.db import get_conn
+from app.db import get_conn, count_unreviewed_clips
 from datetime import datetime, timedelta, timezone
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import sqlite3
 import random
+import time
 from typing import Any
-
 from app.ted_popular import fetch_popular_slugs
 from app.ted_talk_page import fetch_talk_next_data
 from app.ted_extract import extract_youtube_id, extract_transcript_cues
@@ -22,11 +22,16 @@ MIN_UNUSED_NEW = 30  # minimum new clip stock count
 SUPPLY_MAX_PAGE = 308         # popular page 7312/24 = 308
 SUPPLY_TALKS_PER_ROUND = 6    # 한 라운드에서 시도할 talk 수
 SUPPLY_MAX_ROUNDS = 6         # 무한루프 방지
-SUPPLY_SLEEP_SEC = 0.0        # 과도 호출 방지(필요시 0.2 같은 값)
+SUPPLY_SLEEP_SEC = 3.2        # 과도 호출 방지(필요시 0.2 같은 값)
 
 DEFAULT_SUPPLY_PER_TALK = 3
 DEFAULT_SUPPLY_MODEL = "gemini-2.5-flash"
 DEFAULT_SUPPLY_MAX_CANDIDATES = 18
+
+SLUG_COOLDOWN_SEC = 60 * 60  # 1시간
+_slug_last_tried: dict[str, float] = {}
+
+SUPPLY_GLOBAL_TIMEOUT_SEC = 20 * 5 * 4# AI 한번당 12 ~ 20초 * 5개 talk
 
 app = FastAPI(title="EchoSlice API", version="0.0.1")
 
@@ -94,6 +99,7 @@ def create_today_queue(conn: sqlite3.Connection, day: str, limit: int, review_ta
 
     # 핵심: (기본 재고 MIN_UNUSED_NEW)와 (오늘 필요한 slots_left) 중 더 큰 값만큼은 확보
     min_needed = max(MIN_UNUSED_NEW, slots_left)
+
     ensure_new_stock(conn, min_needed)
 
     new_rows = conn.execute(
@@ -118,12 +124,14 @@ def create_today_queue(conn: sqlite3.Connection, day: str, limit: int, review_ta
             (day, pos, cid),
         )
         pos += 1
+    print("reviews_ids size : " + str(pos))
     for cid in new_ids:
         conn.execute(
             "INSERT INTO today_queue (day, position, clip_id, kind) VALUES (?, ?, ?, 'new')",
             (day, pos, cid),
         )
         pos += 1
+    print("new_ids size : " + str(pos))
     conn.commit()
 
     return fetch_today_queue(conn, day)
@@ -218,6 +226,14 @@ def ensure_new_stock(conn: sqlite3.Connection, min_unused: int):
         max_candidates=DEFAULT_SUPPLY_MAX_CANDIDATES,
     )
 
+def _should_skip_slug(slug: str) -> bool:
+    now = time.time()
+    last = _slug_last_tried.get(slug)
+    if last is not None and (now - last) < SLUG_COOLDOWN_SEC:
+        return True
+    _slug_last_tried[slug] = now
+    return False
+
 def ensure_new_clips(
     conn,
     min_needed: int,
@@ -232,6 +248,7 @@ def ensure_new_clips(
     """
     before = count_unreviewed_clips(conn)
     target = before + max(0, min_needed)
+    start_ts = time.time()
 
     rounds = 0
     total_inserted = 0
@@ -240,15 +257,25 @@ def ensure_new_clips(
     errors = 0
 
     while count_unreviewed_clips(conn) < target and rounds < SUPPLY_MAX_ROUNDS:
+        if time.time() - start_ts > SUPPLY_GLOBAL_TIMEOUT_SEC:
+            print("timeout from ensure_new_clips() ")
+            break
         rounds += 1
         page = random.randint(0, SUPPLY_MAX_PAGE)
+        print("selected page : " + str(page))
 
         # page에서 후보 슬러그 가져오기
-        all_slugs = ted_popular.fetch_popular_slugs(page=page)  # 너네 함수명에 맞춰서
+        all_slugs = fetch_popular_slugs(page=page)  # 너네 함수명에 맞춰서
         random.shuffle(all_slugs)
         slugs = all_slugs[:SUPPLY_TALKS_PER_ROUND]
 
         for slug in slugs:
+            if _should_skip_slug(slug):
+                skipped_talks == 1
+                continue
+            if time.time() - start_ts > SUPPLY_GLOBAL_TIMEOUT_SEC:
+                print("timeout from ensure_new_clips() 2")
+                break
             attempted_talks += 1
             try:
                 inserted = supply_one_talk_ai(
@@ -305,17 +332,27 @@ def supply_one_talk_ai(
     - Gemini로 per_talk개 pick
     - insert_clip_candidates_no_overlap로 겹침 없이 insert
     """
+    print("call starts")
     # 1) AI로 클립 후보 pick
     #    반환이 ClipCandidate 리스트라고 가정 (video_id/start_sec/end_sec/title 포함)
-    picked, _meta = ted_ai.generate_ai_clips_for_slug(
+    picked, meta = generate_ai_clips_for_slug(
         slug=slug,
         per_talk=per_talk,
         model=model,
         max_candidates=max_candidates,
     )
-
+    print(picked)
+    print(meta)
+    print("call ends")
     # 2) DB insert (겹침 금지)
-    inserted = ted_clips.insert_clip_candidates_no_overlap(conn, picked)
+    source = meta.get("mode", "unknown")  # "ai" or "fallback"
+    inserted = insert_clip_candidates_no_overlap(
+        conn,
+        picked,
+        talk_slug=slug,
+        source=source,
+    )
+    print(inserted)
     return inserted
 
 
@@ -418,7 +455,8 @@ def ted_supply_ai(
                 model=model,
                 max_candidates=maxCandidates,
             )
-            ins = insert_clip_candidates_no_overlap(conn, candidates)
+            source = meta.get("mode", "unknown")  # "ai" or "fallback"
+            ins = insert_clip_candidates_no_overlap(conn, candidates, talk_slug=slug, source=source)
             created += ins
 
             details.append(
