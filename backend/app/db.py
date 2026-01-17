@@ -2,7 +2,11 @@ import sqlite3
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent  # backend/app
-DB_PATH = BASE_DIR.parent / "echoslice.db"  # backend/echoslice.db
+#DB_PATH = BASE_DIR.parent / "echoslice.db"  # backend/echoslice.db
+DB_PATH = Path(
+    os.getenv("ECHOSLICE_DB_PATH", BASE_DIR.parent / "echoslice.db")
+)
+DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 SCHEMA_PATH = BASE_DIR / "schema.sql"       # backend/app/schema.sql
 
 def get_conn() -> sqlite3.Connection:
