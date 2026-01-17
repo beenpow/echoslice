@@ -261,7 +261,7 @@ def ensure_new_clips(
     attempted_talks = 0
     skipped_talks = 0
     errors = 0
-
+    print("target count : " + str(target))
     while count_unreviewed_clips(conn) < target and rounds < SUPPLY_MAX_ROUNDS:
         if time.time() - start_ts > SUPPLY_GLOBAL_TIMEOUT_SEC:
             print("timeout from ensure_new_clips() ")
@@ -269,6 +269,7 @@ def ensure_new_clips(
         rounds += 1
         page = random.randint(0, SUPPLY_MAX_PAGE)
         print("selected page : " + str(page))
+        print("rounds: " + str(rounds))
 
         # page에서 후보 슬러그 가져오기
         all_slugs = fetch_popular_slugs(page=page)  # 너네 함수명에 맞춰서

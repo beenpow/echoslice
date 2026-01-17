@@ -304,10 +304,10 @@ def generate_ai_clips_for_slug(
         )
 
         if len(rough) < per_talk:
-            meta["mode"] = "fallback"
-            meta["fallbackReason"] = "not_enough_candidates"
-            meta["candidateCount"] = len(rough)
-            return generate_clips_for_slug(slug, per_talk=per_talk, target_sec=target_sec), meta
+            meta["mode"] = "skip"
+            meta["skipReason"] = "not_enough_candidates"
+            print("generate_ai_clips_for_slug: skip :: not enough candidates")
+            return [], meta
 
         cand_payload: list[dict[str, Any]] = []
         for i, c in enumerate(rough):
