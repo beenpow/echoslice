@@ -266,12 +266,12 @@ def generate_ai_clips_for_slug(
         cues = [c for c in cues if isinstance(c, dict)]
         cues.sort(key=lambda c: float(c.get("tSec", 0.0)))
 
-        print("ALL CUES ###########")
-        for i, c in enumerate(cues):
-            t = float(c.get("tSec", 0.0))
-            text = c.get("text", "").replace("\n", " ").strip()
-            preview = text[:120] + ("…" if len(text) > 120 else "")
-            print(f"[{i:03d}] tSec={t:8.3f} | {preview}")
+        # print("ALL CUES ###########")
+        # for i, c in enumerate(cues):
+        #     t = float(c.get("tSec", 0.0))
+        #     text = c.get("text", "").replace("\n", " ").strip()
+        #     preview = text[:120] + ("…" if len(text) > 120 else "")
+        #     print(f"[{i:03d}] tSec={t:8.3f} | {preview}")
 
         # Printing all selected cue elements
         sentence_cues = [
@@ -285,12 +285,12 @@ def generate_ai_clips_for_slug(
         else:
             cues_for_build = cues
 
-        print("GOOD QUALITY CUES ###########")
-        for i, c in enumerate(cues_for_build):
-            t = float(c.get("tSec", 0.0))
-            text = c.get("text", "").replace("\n", " ").strip()
-            preview = text[:120] + ("…" if len(text) > 120 else "")
-            print(f"[{i:03d}] tSec={t:8.3f} | {preview}")
+        # print("GOOD QUALITY CUES ###########")
+        # for i, c in enumerate(cues_for_build):
+        #     t = float(c.get("tSec", 0.0))
+        #     text = c.get("text", "").replace("\n", " ").strip()
+        #     preview = text[:120] + ("…" if len(text) > 120 else "")
+        #     print(f"[{i:03d}] tSec={t:8.3f} | {preview}")
 
         seed = random.randint(1, 1_000_000_000)
         rough = build_clip_candidates_from_cues(

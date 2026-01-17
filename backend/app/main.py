@@ -22,7 +22,7 @@ MIN_UNUSED_NEW = 30  # 30 minimum new clip stock count
 
 SUPPLY_MAX_PAGE = 308         # popular page 7312/24 = 308
 SUPPLY_TALKS_PER_ROUND = 6    # 한 라운드에서 시도할 talk 수
-SUPPLY_MAX_ROUNDS = 6         # 무한루프 방지
+SUPPLY_MAX_ROUNDS = 30         # 무한루프 방지
 SUPPLY_SLEEP_SEC = 3.2        # 과도 호출 방지(필요시 0.2 같은 값)
 
 DEFAULT_SUPPLY_PER_TALK = 3
@@ -104,6 +104,7 @@ def create_today_queue(conn: sqlite3.Connection, day: str, limit: int, review_ta
 
     # 핵심: (기본 재고 MIN_UNUSED_NEW)와 (오늘 필요한 slots_left) 중 더 큰 값만큼은 확보
     min_needed = max(MIN_UNUSED_NEW, slots_left)
+    print("min_needed : " + str(min_needed))
 
     ensure_new_stock(conn, min_needed)
 
