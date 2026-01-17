@@ -16,6 +16,26 @@ def get_conn() -> sqlite3.Connection:
     return conn
 
 
+def is_slug_blocked(conn: sqlite3.Connection, slug: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM bad_slugs WHERE slug = ? LIMIT 1;",
+        (slug,),
+    ).fetchone()
+    return row is not None
+
+def block_slug(conn: sqlite3.Connection, slug: str, reason: str) -> None:
+    conn.execute(
+        """
+        INSERT INTO bad_slugs (slug, reason)
+        VALUES (?, ?)
+        ON CONFLICT(slug) DO UPDATE SET
+          reason = excluded.reason,
+          created_at = datetime('now');
+        """,
+        (slug, reason),
+    )
+    conn.commit()
+
 def migrate_db(conn: sqlite3.Connection) -> None:
     # today_queue에 kind 컬럼이 없으면 추가 (기존 DB 호환)
     cols = conn.execute("PRAGMA table_info(today_queue);").fetchall()
@@ -28,15 +48,15 @@ def migrate_db(conn: sqlite3.Connection) -> None:
 
     conn.execute(
         """
-        CREATE TABLE IF NOT EXISTS gemini_calls (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          created_at TEXT NOT NULL DEFAULT (datetime('now')),
-          reason TEXT
+        CREATE TABLE IF NOT EXISTS bad_slugs (
+          slug TEXT PRIMARY KEY,
+          reason TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
         """
     )
     conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_gemini_calls_created_at ON gemini_calls(created_at);"
+        "CREATE INDEX IF NOT EXISTS idx_bad_slugs_created_at ON bad_slugs(created_at);"
     )
     conn.commit()
 

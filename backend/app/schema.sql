@@ -41,3 +41,10 @@ CREATE INDEX IF NOT EXISTS idx_reviews_next_review_at ON reviews(next_review_at)
 CREATE INDEX IF NOT EXISTS idx_reviews_clip_id ON reviews(clip_id);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_clips_video_time
 ON clips(video_id, start_sec, end_sec);
+
+CREATE TABLE IF NOT EXISTS bad_slugs (
+  slug TEXT PRIMARY KEY,
+  reason TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_bad_slugs_created_at ON bad_slugs(created_at);

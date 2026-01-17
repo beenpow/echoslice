@@ -1,5 +1,5 @@
 from app.db import init_db, DB_PATH
-from app.db import get_conn, count_unreviewed_clips
+from app.db import get_conn, count_unreviewed_clips, is_slug_blocked, block_slug
 from datetime import datetime, timedelta, timezone
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,7 +18,7 @@ from app.ted_ai import generate_ai_clips_for_slug
 
 TODAY_LIMIT = 5
 REVIEW_TARGET = 2
-MIN_UNUSED_NEW = 6  # 30 minimum new clip stock count
+MIN_UNUSED_NEW = 30  # 30 minimum new clip stock count
 
 SUPPLY_MAX_PAGE = 308         # popular page 7312/24 = 308
 SUPPLY_TALKS_PER_ROUND = 6    # 한 라운드에서 시도할 talk 수
@@ -275,8 +275,11 @@ def ensure_new_clips(
         slugs = all_slugs[:SUPPLY_TALKS_PER_ROUND]
 
         for slug in slugs:
+            if is_slug_blocked(conn, slug):
+                skipped_talks += 1
+                continue
             if _should_skip_slug(slug):
-                skipped_talks == 1
+                skipped_talks += 1
                 continue
             if time.time() - start_ts > SUPPLY_GLOBAL_TIMEOUT_SEC:
                 print("timeout from ensure_new_clips() 2")
@@ -350,6 +353,11 @@ def supply_one_talk_ai(
     print(picked)
     print(meta)
     print("call ends")
+    if meta.get("mode") == "skip":
+        print("supply_one_talk_ai: skipped")
+        reason = meta.get("skipReason", "unknown_skip")
+        block_slug(conn, slug, reason)
+        return 0
     # 2) DB insert (겹침 금지)
     source = meta.get("mode", "unknown")  # "ai" or "fallback"
     inserted = insert_clip_candidates_no_overlap(
@@ -471,7 +479,8 @@ def ted_supply_ai(
                 {
                     "slug": slug,
                     "mode": meta.get("mode"),
-                    "fallbackReason": meta.get("fallbackReason"),
+                    "skipReason": meta.get("skipReason"),  # no_cues / no_youtube_id
+                    "error": meta.get("error"),             # exception message (optional)
                     "generated": len(candidates),
                     "inserted": ins,
                 }

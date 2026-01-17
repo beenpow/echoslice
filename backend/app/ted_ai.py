@@ -250,18 +250,18 @@ def generate_ai_clips_for_slug(
         next_data = fetch_talk_next_data(slug, timeout_sec=timeout_sec)
         youtube_id = extract_youtube_id(next_data)
         if not youtube_id:
-            meta["mode"] = "fallback"
-            meta["fallbackReason"] = "no_youtube_id"
-            print("generate_ai_clips_for_slug: no youtubeId")
-            return generate_clips_for_slug(slug, per_talk=per_talk, target_sec=target_sec), meta
+            meta["mode"] = "skip"
+            meta["skipReason"] = "no_youtube_id"
+            print("generate_ai_clips_for_slug: skip :: no youtube id")
+            return [], meta
 
         title = _safe_title(next_data, fallback=slug)
         cues = extract_transcript_cues(next_data)
         if not cues:
-            meta["mode"] = "fallback"
-            meta["fallbackReason"] = "no_cues"
-            print("generate_ai_clips_for_slug: no cues")
-            return generate_clips_for_slug(slug, per_talk=per_talk, target_sec=target_sec), meta
+            meta["mode"] = "skip"
+            meta["skipReason"] = "no_cues"
+            print("generate_ai_clips_for_slug: skip :: no cues")
+            return [], meta
 
         cues = [c for c in cues if isinstance(c, dict)]
         cues.sort(key=lambda c: float(c.get("tSec", 0.0)))
@@ -366,6 +366,6 @@ def generate_ai_clips_for_slug(
         return [rough[i] for i in picked_indices], meta
 
     except Exception as e:
-        meta["mode"] = "fallback"
-        meta["fallbackReason"] = f"{type(e).__name__}: {e}"
-        return generate_clips_for_slug(slug, per_talk=per_talk, target_sec=target_sec), meta
+        meta["mode"] = "error"
+        meta["error"] = f"{type(e).__name__}: {e}"
+        raise
