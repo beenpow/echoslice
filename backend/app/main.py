@@ -18,7 +18,7 @@ from app.ted_ai import generate_ai_clips_for_slug
 
 TODAY_LIMIT = 5
 REVIEW_TARGET = 2
-MIN_UNUSED_NEW = 30  # 30 minimum new clip stock count
+MIN_UNUSED_NEW = 9  # 30 minimum new clip stock count
 
 SUPPLY_MAX_PAGE = 308         # popular page 7312/24 = 308
 SUPPLY_TALKS_PER_ROUND = 6    # 한 라운드에서 시도할 talk 수
