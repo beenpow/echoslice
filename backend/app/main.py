@@ -15,7 +15,11 @@ from app.ted_talk_page import fetch_talk_next_data
 from app.ted_extract import extract_youtube_id, extract_transcript_cues
 from app.ted_clips import generate_clips_for_slug, insert_clip_candidates_no_overlap
 from app.ted_ai import generate_ai_clips_for_slug
+from dotenv import load_dotenv
+from pathlib import Path
 
+BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR / ".env")
 
 TODAY_LIMIT = 5
 REVIEW_TARGET = 2
