@@ -18,9 +18,6 @@ from app.ted_ai import generate_ai_clips_for_slug
 from dotenv import load_dotenv
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-load_dotenv(BASE_DIR / ".env")
-
 TODAY_LIMIT = 5
 REVIEW_TARGET = 2
 MIN_UNUSED_NEW = 30  # 30 minimum new clip stock count
@@ -40,6 +37,13 @@ _slug_last_tried: dict[str, float] = {}
 SUPPLY_GLOBAL_TIMEOUT_SEC = 60 * 5# (AI 한번당 12 ~ 20초 + 15s sleep)* 5개 talk
 
 LA_TZ = ZoneInfo("America/Los_Angeles")
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+# .env 파일이 있을 때만 로드 (서버엔 보통 없음)
+env_path = BASE_DIR / ".env"
+if env_path.exists():
+    load_dotenv(env_path)
 
 k = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or ""
 print("[Gemini] key suffix:", k[-6:] if k else "NONE")
