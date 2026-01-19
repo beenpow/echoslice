@@ -1,5 +1,6 @@
 from app.db import init_db, DB_PATH
 from app.db import get_conn, count_unreviewed_clips, is_slug_blocked, block_slug
+from zoneinfo import ZoneInfo
 from datetime import datetime, timedelta, timezone
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,7 +19,7 @@ from app.ted_ai import generate_ai_clips_for_slug
 
 TODAY_LIMIT = 5
 REVIEW_TARGET = 2
-MIN_UNUSED_NEW = 9  # 30 minimum new clip stock count
+MIN_UNUSED_NEW = 30  # 30 minimum new clip stock count
 
 SUPPLY_MAX_PAGE = 308         # popular page 7312/24 = 308
 SUPPLY_TALKS_PER_ROUND = 6    # 한 라운드에서 시도할 talk 수
@@ -33,6 +34,8 @@ SLUG_COOLDOWN_SEC = 60 * 60  # 1시간
 _slug_last_tried: dict[str, float] = {}
 
 SUPPLY_GLOBAL_TIMEOUT_SEC = 60 * 5# (AI 한번당 12 ~ 20초 + 15s sleep)* 5개 talk
+
+LA_TZ = ZoneInfo("America/Los_Angeles")
 
 k = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or ""
 print("[Gemini] key suffix:", k[-6:] if k else "NONE")
@@ -53,11 +56,21 @@ app.add_middleware(
 )
 
 
-def today_str_utc() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+def today_str_la() -> str:
+    return datetime.now(LA_TZ).strftime("%Y-%m-%d")
 
 def now_str_utc() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+def la_day_to_utc_bounds(day_str: str) -> tuple[str, str]:
+    # day_str: "YYYY-MM-DD" (LA 기준 날짜)
+    y, m, d = map(int, day_str.split("-"))
+    start_la = datetime(y, m, d, 0, 0, 0, tzinfo=LA_TZ)
+    end_la = start_la + timedelta(days=1)
+
+    start_utc = start_la.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    end_utc = end_la.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return start_utc, end_utc
 
 def fetch_today_queue(conn: sqlite3.Connection, day: str) -> list[sqlite3.Row]:
     return conn.execute(
@@ -75,9 +88,14 @@ def create_today_queue(conn: sqlite3.Connection, day: str, limit: int, review_ta
     now_s = now_str_utc()
 
     # 0) 오늘 완료된 clip 제외 (오늘 리뷰한 clip)
+    start_utc, end_utc = la_day_to_utc_bounds(day)
     done_ids = conn.execute(
-        "SELECT DISTINCT clip_id FROM reviews WHERE reviewed_at LIKE ?",
-        (f"{day}%",),
+        """
+        SELECT DISTINCT clip_id
+        FROM reviews
+        WHERE reviewed_at >= ? AND reviewed_at < ?
+        """,
+        (start_utc, end_utc),
     ).fetchall()
     done_set = {r["clip_id"] for r in done_ids}
 
@@ -157,9 +175,14 @@ def reroll_new_only(conn: sqlite3.Connection, day: str, limit: int) -> list[sqli
         return existing  # 신규 슬롯이 없으면 바꿀 것도 없음
 
     # 4) 오늘 완료된 clip 제외
+    start_utc, end_utc = la_day_to_utc_bounds(day)
     done_ids = conn.execute(
-        "SELECT DISTINCT clip_id FROM reviews WHERE reviewed_at LIKE ?",
-        (f"{day}%",),
+        """
+        SELECT DISTINCT clip_id
+        FROM reviews
+        WHERE reviewed_at >= ? AND reviewed_at < ?
+        """,
+        (start_utc, end_utc),
     ).fetchall()
     done_set = {r["clip_id"] for r in done_ids}
 
@@ -514,7 +537,7 @@ def db_health():
 
 @app.get("/today")
 def get_today_payload():
-    day = today_str_utc()
+    day = today_str_la()
 
     with get_conn() as conn:
         rows = fetch_today_queue(conn, day)
@@ -534,9 +557,14 @@ def get_today_payload():
             for r in rows
         ]
 
+        start_utc, end_utc = la_day_to_utc_bounds(day)
         done_rows = conn.execute(
-            "SELECT DISTINCT clip_id FROM reviews WHERE reviewed_at LIKE ?",
-            (f"{day}%",),
+            """
+            SELECT DISTINCT clip_id
+            FROM reviews
+            WHERE reviewed_at >= ? AND reviewed_at < ?
+            """,
+            (start_utc, end_utc),
         ).fetchall()
         completed_clip_ids = [d["clip_id"] for d in done_rows]
 
@@ -548,7 +576,7 @@ def get_today_payload():
 
 @app.get("/clips/today")
 def get_today_clips() -> list[dict[str, Any]]:
-    day = today_str_utc()
+    day = today_str_la()
     with get_conn() as conn:
         rows = fetch_today_queue(conn, day)
         if not rows:
@@ -568,7 +596,7 @@ def get_today_clips() -> list[dict[str, Any]]:
 
 @app.post("/clips/today/reroll")
 def reroll_today_new() -> list[dict[str, Any]]:
-    day = today_str_utc()
+    day = today_str_la()
     with get_conn() as conn:
         rows = reroll_new_only(conn, day, TODAY_LIMIT)
 
@@ -586,7 +614,7 @@ def reroll_today_new() -> list[dict[str, Any]]:
 
 @app.post("/clips/today/reroll_one")
 def reroll_today_one(req: RerollOneRequest):
-    day = today_str_utc()
+    day = today_str_la()
 
     with get_conn() as conn:
         # 1) 해당 슬롯이 있는지, 그리고 new인지 확인
@@ -687,8 +715,8 @@ def create_review(payload: ReviewCreate):
 
 @app.get("/reviews/today")
 def get_today_reviews():
-    today_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-
+    day = today_str_la()
+    start_utc, end_utc = la_day_to_utc_bounds(day)
     with get_conn() as conn:
         rows = conn.execute(
             """
@@ -699,10 +727,10 @@ def get_today_reviews():
                 r.reviewed_at,
                 r.next_review_at
             FROM reviews r
-            WHERE r.reviewed_at LIKE ?
+            WHERE r.reviewed_at >= ? AND r.reviewed_at < ?
             ORDER BY r.reviewed_at DESC
             """,
-            (f"{today_utc}%",),
+            (start_utc, end_utc),
         ).fetchall()
     
     return [
