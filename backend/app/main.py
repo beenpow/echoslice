@@ -17,6 +17,7 @@ from app.ted_clips import generate_clips_for_slug, insert_clip_candidates_no_ove
 from app.ted_ai import generate_ai_clips_for_slug
 from dotenv import load_dotenv
 from pathlib import Path
+from app.routers.timeslicer import router as timeslicer_router
 
 TODAY_LIMIT = 5
 REVIEW_TARGET = 2
@@ -57,12 +58,14 @@ app.add_middleware(
         "http://localhost:5173",
         "http://127.0.0.1:5173",
         "https://echoslicefront.vercel.app",
+        "http://localhost:3000",
     ],
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+app.include_router(timeslicer_router)
 
 def today_str_la() -> str:
     return datetime.now(LA_TZ).strftime("%Y-%m-%d")
