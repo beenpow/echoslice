@@ -58,6 +58,7 @@ app.add_middleware(
         "http://localhost:5173",
         "http://127.0.0.1:5173",
         "https://echoslicefront.vercel.app",
+        "https://timeslicer-rose.vercel.app/",
         "http://localhost:3000",
     ],
     allow_credentials=False,
