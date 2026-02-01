@@ -44,6 +44,9 @@ class StatePayload(BaseModel):
 
 @router.get("/state")
 def get_state(req: Request):
+    client_id = request.headers.get("x-timeslicer-client", "unknown")
+    logger.info(f"[timeslicer] client={client_id} {request.method} {request.url.path}")
+
     require_token(req)
     ensure_table()
     with get_conn() as conn:
@@ -63,6 +66,9 @@ def get_state(req: Request):
 
 @router.put("/state")
 def put_state(payload: StatePayload, req: Request):
+    client_id = request.headers.get("x-timeslicer-client", "unknown")
+    logger.info(f"[timeslicer] client={client_id} {request.method} {request.url.path}")
+    
     require_token(req)
     ensure_table()
 
