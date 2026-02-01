@@ -4,6 +4,8 @@ import os
 import sqlite3
 from datetime import datetime
 import json
+import logging
+
 
 router = APIRouter(prefix="/timeslicer", tags=["timeslicer"])
 
@@ -44,8 +46,9 @@ class StatePayload(BaseModel):
 
 @router.get("/state")
 def get_state(req: Request):
-    client_id = request.headers.get("x-timeslicer-client", "unknown")
-    logger.info(f"[timeslicer] client={client_id} {request.method} {request.url.path}")
+    logger = logging.getLogger("timeslicer")
+    client_id = req.headers.get("x-timeslicer-client", "unknown")
+    logger.info(f"[timeslicer] client={client_id} {req.method} {req.url.path}")
 
     require_token(req)
     ensure_table()
@@ -66,8 +69,9 @@ def get_state(req: Request):
 
 @router.put("/state")
 def put_state(payload: StatePayload, req: Request):
-    client_id = request.headers.get("x-timeslicer-client", "unknown")
-    logger.info(f"[timeslicer] client={client_id} {request.method} {request.url.path}")
+    logger = logging.getLogger("timeslicer")
+    client_id = req.headers.get("x-timeslicer-client", "unknown")
+    logger.info(f"[timeslicer] client={client_id} {req.method} {req.url.path}")
     
     require_token(req)
     ensure_table()
