@@ -10,7 +10,7 @@ declare global {
 type Props = {
     videoId: string;
     startSec: number;
-    endSec : number;
+    endSec: number;
 };
 
 export default function YoutubeClipPlayer({ videoId, startSec, endSec }: Props) {
@@ -45,9 +45,9 @@ export default function YoutubeClipPlayer({ videoId, startSec, endSec }: Props) 
         const onKeyDown = (e: KeyboardEvent) => {
             const target = e.target as HTMLElement | null;
             const tag = target?.tagName?.toLowerCase();
-            const isTyping = 
+            const isTyping =
                 tag == "input" || tag == "textarea" || (target as any)?.isContentEditable;
-            
+
             if (isTyping) return;
             if (e.code == "Space") {
                 e.preventDefault();
@@ -56,7 +56,6 @@ export default function YoutubeClipPlayer({ videoId, startSec, endSec }: Props) 
         };
         window.addEventListener("keydown", onKeyDown);
         return () => window.removeEventListener("keydown", onKeyDown);
-
     }, [startSec, videoId, endSec]);
 
     useEffect(() => {
@@ -102,9 +101,7 @@ export default function YoutubeClipPlayer({ videoId, startSec, endSec }: Props) 
             pendingCueRef.current = { videoId };
             return;
         }
-        // Changing the video. (Not playing it)
         player.cueVideoById(videoId);
-        // Set it as paused one.
         setIsPlaying(false);
     }, [videoId, isReady]);
 
@@ -114,8 +111,8 @@ export default function YoutubeClipPlayer({ videoId, startSec, endSec }: Props) 
 
             if (!playerRef.current) {
                 playerRef.current = new window.YT.Player(containerRef.current, {
-                    height: "360",
-                    width: "640",
+                    height: "100%",
+                    width: "100%",
                     videoId,
                     playerVars: {
                         controls: 1,
@@ -124,7 +121,6 @@ export default function YoutubeClipPlayer({ videoId, startSec, endSec }: Props) 
                     },
                     events: {
                         onReady: () => {
-                            console.log("Player ready");
                             setIsReady(true);
 
                             const pending = pendingCueRef.current;
@@ -138,54 +134,62 @@ export default function YoutubeClipPlayer({ videoId, startSec, endSec }: Props) 
             }
         };
 
-        // 1) Skip if YT is already loaded
         if (window.YT) {
             loadAndCreate();
             return;
         }
-        // 2) add script tag
         const existing = document.querySelector('script[src="https://www.youtube.com/iframe_api"]');
         if (!existing) {
-          const tag = document.createElement("script");
-          tag.src = "https://www.youtube.com/iframe_api";
-          document.body.appendChild(tag);
+            const tag = document.createElement("script");
+            tag.src = "https://www.youtube.com/iframe_api";
+            document.body.appendChild(tag);
         }
-        
-        // 3. Load done callback
+
         window.onYouTubeIframeAPIReady = () => {
-            console.log("Youtube IFrame API ready");
             loadAndCreate();
         };
     }, [videoId]);
 
     return (
-        <div>
-            <h2>YoutubeClipPlayer</h2>
-            {/* Youtube Player position */}
-            <div
-                ref={containerRef}
-                style={{
-                    width: 1000,
-                    height: 800,
-                    background: "#222",
-                }}
-            />
-            <div style={{ marginTop: 8 }}>
-                <button ref={playBtnRef} onClick={handlePlayFromStart}>Play from startSec</button>
-                <button onClick={handlePause} style = {{ marginLeft: 8}}>
+        <div className="player-wrapper">
+            <div className="player-aspect">
+                <div
+                    ref={containerRef}
+                    className="player-embed"
+                    aria-label="YouTube clip player"
+                />
+            </div>
+            <div className="player-controls">
+                <button
+                    ref={playBtnRef}
+                    type="button"
+                    className="player-ctrl-btn primary"
+                    onClick={handlePlayFromStart}
+                >
+                    ▶ Play
+                </button>
+                <button type="button" className="player-ctrl-btn" onClick={handlePause}>
                     Pause
                 </button>
-                <button onClick={() => setIsLooping((prev) => !prev)}>
-                    Loop: {isLooping ? "ON" : "OFF"}
+                <button
+                    type="button"
+                    className={`player-ctrl-btn toggle ${isLooping ? "on" : ""}`}
+                    onClick={() => setIsLooping((prev) => !prev)}
+                    title="Loop clip"
+                >
+                    Loop {isLooping ? "ON" : "OFF"}
                 </button>
-                <button onClick={() => setIsCCOn((prev) => !prev)}>
-                    CC: {isCCOn ? "ON" : "OFF"}
-                </button>                
-            </div>
-
-            <div>VideoId: {videoId}</div>
-            <div>
-                start: {startSec}s, end: {endSec}s
+                <button
+                    type="button"
+                    className={`player-ctrl-btn toggle ${isCCOn ? "on" : ""}`}
+                    onClick={() => setIsCCOn((prev) => !prev)}
+                    title="Subtitles"
+                >
+                    CC {isCCOn ? "ON" : "OFF"}
+                </button>
+                <span className="player-time">
+                    {startSec}s – {endSec}s
+                </span>
             </div>
         </div>
     );
