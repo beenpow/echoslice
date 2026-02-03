@@ -47,7 +47,7 @@ if env_path.exists():
     load_dotenv(env_path)
 
 k = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or ""
-print("[Gemini] key suffix:", k[-6:] if k else "NONE")
+print(f"[echoslice] startup gemini_key={'***'+k[-6:] if k else 'NONE'}")
 
 app = FastAPI(title="EchoSlice API", version="0.0.1")
 
@@ -136,7 +136,7 @@ def create_today_queue(conn: sqlite3.Connection, day: str, limit: int, review_ta
 
     # 핵심: (기본 재고 MIN_UNUSED_NEW)와 (오늘 필요한 slots_left) 중 더 큰 값만큼은 확보
     min_needed = max(MIN_UNUSED_NEW, slots_left)
-    print("min_needed : " + str(min_needed))
+    print(f"[echoslice] today create_queue day={day} min_needed={min_needed} review_slots={len(review_ids)}")
 
     ensure_new_stock(conn, min_needed)
 
@@ -162,14 +162,13 @@ def create_today_queue(conn: sqlite3.Connection, day: str, limit: int, review_ta
             (day, pos, cid),
         )
         pos += 1
-    print("reviews_ids size : " + str(pos))
     for cid in new_ids:
         conn.execute(
             "INSERT INTO today_queue (day, position, clip_id, kind) VALUES (?, ?, ?, 'new')",
             (day, pos, cid),
         )
         pos += 1
-    print("new_ids size : " + str(pos))
+    print(f"[echoslice] today create_queue day={day} ok review={len(review_ids)} new={len(new_ids)}")
     conn.commit()
 
     return fetch_today_queue(conn, day)
@@ -298,15 +297,13 @@ def ensure_new_clips(
     attempted_talks = 0
     skipped_talks = 0
     errors = 0
-    print("target count : " + str(target))
+    print(f"[echoslice] ensure_new_clips start target={target} before={before}")
     while count_unreviewed_clips(conn) < target and rounds < SUPPLY_MAX_ROUNDS:
         if time.time() - start_ts > SUPPLY_GLOBAL_TIMEOUT_SEC:
-            print("timeout from ensure_new_clips() ")
+            print("[echoslice] ensure_new_clips timeout")
             break
         rounds += 1
         page = random.randint(0, SUPPLY_MAX_PAGE)
-        print("selected page : " + str(page))
-        print("rounds: " + str(rounds))
 
         # page에서 후보 슬러그 가져오기
         all_slugs = fetch_popular_slugs(page=page)  # 너네 함수명에 맞춰서
@@ -321,7 +318,7 @@ def ensure_new_clips(
                 skipped_talks += 1
                 continue
             if time.time() - start_ts > SUPPLY_GLOBAL_TIMEOUT_SEC:
-                print("timeout from ensure_new_clips() 2")
+                print("[echoslice] ensure_new_clips timeout (inner)")
                 break
             attempted_talks += 1
             try:
@@ -342,15 +339,16 @@ def ensure_new_clips(
                 if SUPPLY_SLEEP_SEC > 0:
                     time.sleep(SUPPLY_SLEEP_SEC)
 
-            except Exception:
+            except Exception as e:
                 errors += 1
-                # 한 talk 에러는 전체 공급을 멈추지 않고 계속
+                print(f"[echoslice] ensure_new_clips slug={slug} error {type(e).__name__}: {e}")
                 continue
 
         if count_unreviewed_clips(conn) >= target:
             break
 
     after = count_unreviewed_clips(conn)
+    print(f"[echoslice] ensure_new_clips ok rounds={rounds} attempted={attempted_talks} inserted={after - before} errors={errors}")
     return {
         "beforeNew": before,
         "afterNew": after,
@@ -379,9 +377,6 @@ def supply_one_talk_ai(
     - Gemini로 per_talk개 pick
     - insert_clip_candidates_no_overlap로 겹침 없이 insert
     """
-    print("call starts")
-    # 1) AI로 클립 후보 pick
-    #    반환이 ClipCandidate 리스트라고 가정 (video_id/start_sec/end_sec/title 포함)
     picked, meta = generate_ai_clips_for_slug(
         slug=slug,
         conn=conn,
@@ -389,23 +384,18 @@ def supply_one_talk_ai(
         model=model,
         max_candidates=max_candidates,
     )
-    print(picked)
-    print(meta)
-    print("call ends")
     if meta.get("mode") == "skip":
-        print("supply_one_talk_ai: skipped")
         reason = meta.get("skipReason", "unknown_skip")
         block_slug(conn, slug, reason)
         return 0
-    # 2) DB insert (겹침 금지)
-    source = meta.get("mode", "unknown")  # "ai" or "fallback"
+    source = meta.get("mode", "unknown")
     inserted = insert_clip_candidates_no_overlap(
         conn,
         picked,
         talk_slug=slug,
         source=source,
     )
-    print(inserted)
+    print(f"[echoslice] supply_one_talk slug={slug} insert ok inserted={inserted}")
     return inserted
 
 
@@ -514,14 +504,27 @@ def ted_supply_ai(
             ins = insert_clip_candidates_no_overlap(conn, candidates, talk_slug=slug, source=source)
             created += ins
 
+            # 선택된 클립별 확인용 URL (눈으로 검증용)
+            verify_clips = [
+                {
+                    "videoId": c.video_id,
+                    "startSec": c.start_sec,
+                    "endSec": c.end_sec,
+                    "verifyUrl": f"https://www.youtube.com/watch?v={c.video_id}&t={int(c.start_sec)}",
+                }
+                for c in candidates
+            ]
             details.append(
                 {
                     "slug": slug,
                     "mode": meta.get("mode"),
-                    "skipReason": meta.get("skipReason"),  # no_cues / no_youtube_id
+                    "transcriptSource": meta.get("transcriptSource"),  # "whisper" | "youtube" | "ted"
+                    "segmentSelection": meta.get("segmentSelection"),  # "gemini" | "naive" | "skip_first_only"
+                    "skipReason": meta.get("skipReason"),  # no_cues / no_youtube_id / gemini_daily_limit
                     "error": meta.get("error"),             # exception message (optional)
                     "generated": len(candidates),
                     "inserted": ins,
+                    "verifyClips": verify_clips,
                 }
             )
 

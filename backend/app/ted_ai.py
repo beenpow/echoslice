@@ -9,6 +9,7 @@ from typing import Any
 from app.db import gemini_calls_today, log_gemini_call
 from app.ted_talk_page import fetch_talk_next_data
 from app.ted_extract import extract_youtube_id, extract_transcript_cues
+from app.youtube_transcript import fetch_youtube_transcript, fetch_youtube_transcript_whisper
 from app.ted_clips import (
     ClipCandidate,
     build_clip_candidates_from_cues,
@@ -17,6 +18,9 @@ from app.ted_clips import (
 
 MAX_TEXT_CHARS = 280  # 튜닝 가능
 GEMINI_DAILY_LIMIT = 50
+
+# 1순위만 시도, 실패 시 fallback 없이 스킵 (대본=Whisper만, 구간=Gemini만)
+PREFER_FIRST_ONLY = True
 
 class GeminiDailyLimitExceeded(RuntimeError):
     pass
@@ -79,6 +83,77 @@ def _window_text(cues: list[dict[str, Any]], start_sec: int, end_sec: int) -> st
         if isinstance(text, str) and text.strip():
             parts.append(text.strip())
     return " ".join(parts).strip()
+
+
+def _log_supply_debug(
+    slug: str,
+    title: str,
+    youtube_id: str,
+    transcript_source: str | None,
+    cues: list[dict[str, Any]],
+    rough: list[ClipCandidate],
+    picked_indices: list[int],
+    cues_full: list[dict[str, Any]] | None = None,
+) -> None:
+    """Pretty-print transcript, candidate segments, and selected clips for manual verification."""
+    sep = "=" * 72
+    small_sep = "-" * 72
+    cues_for_segments = cues_full if cues_full is not None else cues
+
+    print(sep)
+    print(f"[echoslice] supply debug slug={slug}")
+    print(f" title: {title}")
+    print(f" youtube_id: {youtube_id}")
+    print(f" transcript_source: {transcript_source or 'unknown'}")
+    print(sep)
+
+    print("\n▼ 대본 전체 (cues)")
+    print(small_sep)
+    for i, c in enumerate(cues[:80]):  # first 80 lines
+        t = c.get("tSec", 0)
+        text = (c.get("text") or "").replace("\n", " ").strip()
+        preview = text[:80] + ("…" if len(text) > 80 else "")
+        print(f"  [{i:3d}] {t:7.1f}s  {preview}")
+    if len(cues) > 80:
+        print(f"  ... and {len(cues) - 80} more cues")
+    print(small_sep)
+
+    print("\n▼ 후보 구간 (candidates, 구간 나눈 결과)")
+    print(small_sep)
+    for i, c in enumerate(rough):
+        print(f"  [{i}]  {c.start_sec}s ~ {c.end_sec}s  (duration {c.end_sec - c.start_sec}s)")
+    print(small_sep)
+
+    print("\n▼ 선택된 구간 (Gemini가 고른 것)")
+    print(small_sep)
+    for idx in picked_indices:
+        if 0 <= idx < len(rough):
+            c = rough[idx]
+            url = f"https://www.youtube.com/watch?v={c.video_id}&t={int(c.start_sec)}"
+            print(f"  index={idx}  video_id={c.video_id}  {c.start_sec}s ~ {c.end_sec}s")
+            print(f"  → 확인: {url}")
+    print(small_sep)
+
+    print("\n▼ 선택된 구간별 대사 (해당 시간에 나와야 할 멘트)")
+    print(small_sep)
+    for idx in picked_indices:
+        if 0 <= idx < len(rough):
+            clip = rough[idx]
+            print(f"\n  [선택 #{idx}]  {clip.start_sec}s ~ {clip.end_sec}s")
+            # 이 구간에 해당하는 cue만 필터 (전체 대본 기준)
+            for cue in cues_for_segments:
+                t = cue.get("tSec")
+                text = (cue.get("text") or "").replace("\n", " ").strip()
+                if not isinstance(t, (int, float)) or not text:
+                    continue
+                if t < clip.start_sec:
+                    continue
+                if t > clip.end_sec:
+                    break
+                print(f"    {t:7.1f}s  {text}")
+            print("")
+    print(small_sep)
+    print("")
 
 def _gemini_pick_indices_safe(
     *,
@@ -245,24 +320,48 @@ def generate_ai_clips_for_slug(
         "perTalk": per_talk,
         "maxCandidates": max_candidates,
     }
-    print("generate_ai_clips_for_slug")
+    print(f"[echoslice] supply slug={slug} start")
     try:
         next_data = fetch_talk_next_data(slug, timeout_sec=timeout_sec)
         youtube_id = extract_youtube_id(next_data)
         if not youtube_id:
             meta["mode"] = "skip"
             meta["skipReason"] = "no_youtube_id"
-            print("generate_ai_clips_for_slug: skip :: no youtube id")
+            print(f"[echoslice] supply slug={slug} skip no_youtube_id")
             return [], meta
 
         title = _safe_title(next_data, fallback=slug)
-        cues = extract_transcript_cues(next_data)
+
+        # 1) Whisper 2) youtube-transcript-api 3) TED cues. PREFER_FIRST_ONLY면 Whisper만 시도
+        first_only = PREFER_FIRST_ONLY
+        cues = []
+        try:
+            cues = fetch_youtube_transcript_whisper(youtube_id, model_name="base")
+            if cues:
+                meta["transcriptSource"] = "whisper"
+        except Exception as e:
+            meta["transcriptSourceError"] = f"whisper: {type(e).__name__}: {e}"
+        if not cues and not first_only:
+            try:
+                cues = fetch_youtube_transcript(youtube_id)
+                if cues:
+                    meta["transcriptSource"] = "youtube"
+            except Exception as e:
+                meta["transcriptSourceError"] = (meta.get("transcriptSourceError") or "") + f" youtube_api: {type(e).__name__}: {e}"
+        if not cues and not first_only:
+            cues = extract_transcript_cues(next_data)
+            if cues:
+                meta["transcriptSource"] = "ted"
         if not cues:
             meta["mode"] = "skip"
             meta["skipReason"] = "no_cues"
-            print("generate_ai_clips_for_slug: skip :: no cues")
+            if first_only:
+                print(f"[echoslice] supply slug={slug} skip no_cues (PREFER_FIRST_ONLY)")
+            else:
+                print(f"[echoslice] supply slug={slug} skip no_cues")
             return [], meta
 
+        print(f"[echoslice] supply slug={slug} transcript_source={meta.get('transcriptSource', '?')}")
         cues = [c for c in cues if isinstance(c, dict)]
         cues.sort(key=lambda c: float(c.get("tSec", 0.0)))
 
@@ -306,7 +405,7 @@ def generate_ai_clips_for_slug(
         if len(rough) < per_talk:
             meta["mode"] = "skip"
             meta["skipReason"] = "not_enough_candidates"
-            print("generate_ai_clips_for_slug: skip :: not enough candidates")
+            print(f"[echoslice] supply slug={slug} skip not_enough_candidates (have {len(rough)} need {per_talk})")
             return [], meta
 
         cand_payload: list[dict[str, Any]] = []
@@ -325,9 +424,9 @@ def generate_ai_clips_for_slug(
             )
 
         try:
-            print("going to sleep for 5 seconds")
             time.sleep(5)
             start_ts = time.time()
+            print(f"[echoslice] supply slug={slug} gemini pick start")
             picked_indices, picked_meta = _gemini_pick_indices_safe(
                 conn=conn,
                 reason=f"pick_indices:{slug}",
@@ -337,9 +436,7 @@ def generate_ai_clips_for_slug(
                 candidates=cand_payload,
                 k=per_talk,
             )
-            elapsed_ts = time.time() - start_ts
-            print("time took to _gemini_pick_indices : " + str(elapsed_ts))
-            print("generate_ai_clips_for_slug: 5")
+            print(f"[echoslice] supply slug={slug} gemini pick ok ({time.time() - start_ts:.1f}s)")
         except Exception as e:
             msg = str(e)
             # 429 RESOURCE_EXHAUSTED면 retryDelay만큼 기다렸다가 1회 재시도
@@ -356,16 +453,38 @@ def generate_ai_clips_for_slug(
             else:
                 raise
         except GeminiDailyLimitExceeded as e:
+            if PREFER_FIRST_ONLY:
+                meta["mode"] = "skip"
+                meta["skipReason"] = "gemini_daily_limit"
+                meta["segmentSelection"] = "skip_first_only"
+                print(f"[echoslice] supply slug={slug} skip gemini_daily_limit (PREFER_FIRST_ONLY)")
+                return [], meta
             meta["mode"] = "fallback"
             meta["fallbackReason"] = f"gemini_daily_limit: {e}"
+            meta["segmentSelection"] = "naive"
+            print(f"[echoslice] supply slug={slug} segment_selection=naive fallback")
             return generate_clips_for_slug(slug, per_talk=per_talk, target_sec=target_sec), meta
-
 
         meta["picked"] = picked_indices
         meta["gemini"] = picked_meta
+        meta["segmentSelection"] = "gemini"
+        print(f"[echoslice] supply slug={slug} segment_selection=gemini ok")
+
+        _log_supply_debug(
+            slug=slug,
+            title=title,
+            youtube_id=youtube_id,
+            transcript_source=meta.get("transcriptSource"),
+            cues=cues_for_build,
+            rough=rough,
+            picked_indices=picked_indices,
+            cues_full=cues,
+        )
+
         return [rough[i] for i in picked_indices], meta
 
     except Exception as e:
         meta["mode"] = "error"
         meta["error"] = f"{type(e).__name__}: {e}"
+        print(f"[echoslice] supply slug={slug} error {type(e).__name__}: {e}")
         raise

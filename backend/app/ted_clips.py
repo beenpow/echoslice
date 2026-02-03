@@ -221,7 +221,6 @@ def insert_clip_candidates(
 
 
 def _fetch_existing_ranges(conn, video_id: str) -> list[tuple[int, int]]:
-    print("_fetch_existing_ranges")
     rows = conn.execute(
         "SELECT start_sec, end_sec FROM clips WHERE video_id = ? ORDER BY start_sec",
         (video_id,),
@@ -246,29 +245,20 @@ def insert_clip_candidates_no_overlap(conn, candidates, talk_slug: str | None, s
     그 외만 insert. (동일 start/end 중복은 기존 UNIQUE/insert 로직이 추가로 막아도 OK)
     """
     inserted = 0
-    print("insert_clip_candidates_no_overlap")
 
-    # videoId별로 기존 ranges를 한 번만 가져오고, 배치에서 채택된 ranges도 여기에 계속 추가
     cache: dict[str, list[tuple[int, int]]] = {}
 
     for c in candidates:
         vid = c.video_id
         start = int(c.start_sec)
         end = int(c.end_sec)
-        print(vid)
         if vid not in cache:
-            print("insert_clip_candidates_no_overlap: 1")
             cache[vid] = _fetch_existing_ranges(conn, vid)
 
-        # DB existing + already accepted in this run 모두 포함해서 overlap 체크
         if _overlaps_any(cache[vid], start, end):
-            print("insert_clip_candidates_no_overlap: 2")
             continue
 
-        # 여기까지 통과면 insert 시도
-        # (너희 기존 insert_clip_candidate/insert_clip_candidates 로직 재사용해도 됨)
         try:
-            print("insert_clip_candidates_no_overlap: 3")
             conn.execute(
                 """
                 INSERT INTO clips (video_id, start_sec, end_sec, title, talk_slug, source)
@@ -278,13 +268,9 @@ def insert_clip_candidates_no_overlap(conn, candidates, talk_slug: str | None, s
             )
             inserted += 1
 
-            # 방금 넣은 구간을 cache에 추가해서 같은 배치 내 오버랩도 방지
             cache[vid].append((start, end))
         except Exception as e:
-            # UNIQUE 충돌 같은 건 그냥 스킵
-            print("insert_clip_candidates_no_overlap: 55", type(e).__name__, e)
             continue
 
     conn.commit()
-    print(inserted)
     return inserted
