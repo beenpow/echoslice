@@ -1,158 +1,95 @@
-# EchoSlice – Development Planning Notes
+# EchoSlice
 
-## Tech Stack (Fixed)
-- **Frontend**: React + TypeScript
-- **Backend**: FastAPI (Python)
-- **AI**: Pre-trained LLM (selection / ranking only)
-- **Video**: YouTube IFrame Player API
-- **Data Source**: YouTube Data API v3
+Dev planning notes.
 
----
+## Stack
 
-## 1. MVP Scope (Do Not Expand)
-
-To avoid scope creep, the MVP is limited to **4 core features** only.
-
-1. **Clip Playback**
-   - Play only a specific YouTube segment (start/end)
-   - Loop on/off toggle
-   - One-click replay for speaking practice
-
-2. **Clip Storage & Library**
-   - Add Clip: YouTube URL + start/end
-   - Save clips
-   - View and replay saved clips in Library
-
-3. **Today / Review (Spaced Repetition)**
-   - Show clips due for today
-   - Mark result: Hard / OK / Easy
-   - Update next review date automatically
-
-4. **AI Discovery (Minimal)**
-   - Recommend 3 candidate videos based on topic/difficulty
-   - No automatic sentence extraction in MVP
+- React + TypeScript (frontend)
+- FastAPI (backend)
+- YouTube IFrame Player API for segment playback
+- YouTube Data API v3 for search and metadata
+- LLM only for recommendation/ranking (no training or fine-tuning)
 
 ---
 
-## 2. Data Model (Initial)
+## MVP scope
 
-### Clips
-- `id`
-- `video_id`
-- `title`
-- `start_sec`
-- `end_sec`
-- `topic`
-- `created_at`
+Sticking to these four. Everything else later.
 
-### Review Items
-- `id`
-- `clip_id`
-- `due_date`
-- `interval_days`
-- `last_practiced_at`
-- `state` (new / learning / review)
-
-### Practice Logs
-- `id`
-- `clip_id`
-- `practiced_at`
-- `result` (hard / ok / easy)
-
-### Ratings
-- `id`
-- `clip_id`
-- `rating` (1–5)
-- `created_at`
-
-> MVP starts as **single-user**.  
-> `user_id` can be added later without schema redesign.
+1. **Clip playback** – Play a segment of a YouTube video by start/end. Loop on/off, one-click replay for speaking practice.
+2. **Clip storage & library** – Save clips (URL + start/end), list and replay them.
+3. **Today / review (spaced repetition)** – Show clips due today, mark Hard/OK/Easy, auto-update next review date.
+4. **AI discovery (minimal)** – Recommend ~3 candidate videos by topic/difficulty. No automatic sentence extraction in MVP.
 
 ---
 
-## 3. Backend API Endpoints (Minimum)
+## Data model (draft)
+
+**Clips**: id, video_id, title, start_sec, end_sec, topic, created_at  
+**Review Items**: id, clip_id, due_date, interval_days, last_practiced_at, state (new / learning / review)  
+**Practice Logs**: id, clip_id, practiced_at, result (hard / ok / easy)  
+**Ratings**: id, clip_id, rating (1–5), created_at  
+
+MVP is single-user. Adding user_id later won’t require a schema redesign.
+
+---
+
+## Backend API (minimum)
 
 - `POST /clips` – create clip
 - `GET /clips` – list clips
-- `GET /clips/{id}` – get clip detail
+- `GET /clips/{id}` – clip detail
 - `POST /practice` – log practice + update review schedule
-- `GET /reviews/due` – get today’s review list
+- `GET /reviews/due` – today’s review list
 - `POST /ratings` – save 1–5 rating
 - `GET /discover/recommendations` – AI video recommendations
 
 ---
 
-## 4. YouTube Playback Strategy (Frontend Core)
+## YouTube segment playback (frontend)
 
-- Use **YouTube IFrame Player API**
-- On Play:
-  - `seekTo(start_sec)`
-  - `playVideo()`
-- Poll `getCurrentTime()`
-  - If `>= end_sec`:
-    - Loop ON → `seekTo(start_sec)`
-    - Loop OFF → `pauseVideo()`
-
-> Desktop web only (no mobile autoplay concerns).
+Use YouTube IFrame Player API. On play: `seekTo(start_sec)` then `playVideo()`.  
+Poll `getCurrentTime()`; when it hits end_sec: if loop is on, `seekTo(start_sec)` again; if off, `pauseVideo()`.  
+Desktop web only for now (skipping mobile autoplay issues).
 
 ---
 
-## 5. YouTube Data API Usage (Backend)
+## YouTube Data API (backend)
 
-- Use `search.list` to retrieve candidate videos
-  - Keywords: `TED`, `TED talk`, topic keywords
-  - Filters: medium duration, captions preferred
-- Use `videos.list` to enrich metadata
-  - duration
-  - title / description
-- Pass candidates to LLM for ranking
+- `search.list`: TED, TED talk + topic keywords for candidates. Prefer medium length and captions.
+- `videos.list`: enrich with duration, title, description.
+- Send candidates to LLM for ranking.
 
 ---
 
-## 6. AI Usage Philosophy
+## How we use AI
 
-- ❌ No model training or fine-tuning
-- ❌ No pronunciation scoring
-- ✅ LLM used only for **selection & ranking**
-
-### AI Responsibilities
-- Rank candidate videos for speaking practice
-- Explain selection briefly (1 line)
-- Use user preferences + past ratings as feedback
-
-> AI acts as a **decision layer**, not a generator or evaluator.
+No model training, fine-tuning, or pronunciation scoring.  
+LLM does **selection and ranking** only: pick videos good for speaking practice, one-line explanation, use preferences and past ratings.  
+So it’s a decision layer, not a generator or evaluator.
 
 ---
 
-## 7. Development Order (Critical)
+## Dev order
 
-1. **Frontend only**
-   - Implement YouTube segment playback component
-2. Backend CRUD for clips
-3. Review / Today logic
-4. AI Discovery (last)
-
----
-
-## 8. First Task (Start Here)
-
-Implement a reusable React component:
-
-**Inputs**
-- `videoId`
-- `startSec`
-- `endSec`
-
-**Controls**
-- Play
-- Pause
-- Loop on/off
-
-> Once this works, the project is already 50% done.
+1. Frontend only: YouTube segment playback component first.
+2. Clip CRUD (backend).
+3. Review / today logic.
+4. AI discovery last.
 
 ---
 
-## Project Principle
+## First task
 
-> Build a tool I actually use every day.  
-> Short clips, real sentences, repetition, and habit.
+One reusable React component:
+
+- **Inputs**: videoId, startSec, endSec  
+- **Controls**: play, pause, loop on/off  
+
+Get that working and we’re halfway there.
+
+---
+
+## Principle
+
+Build something I’ll actually use every day. Short clips, real sentences, repetition, habit.
