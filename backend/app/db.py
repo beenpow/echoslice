@@ -37,12 +37,12 @@ def block_slug(conn: sqlite3.Connection, slug: str, reason: str) -> None:
     conn.commit()
 
 def migrate_db(conn: sqlite3.Connection) -> None:
-    # today_queue에 kind 컬럼이 없으면 추가 (기존 DB 호환)
+    # Add kind column to today_queue if missing (backward compatibility)
     cols = conn.execute("PRAGMA table_info(today_queue);").fetchall()
     col_names = {c["name"] for c in cols}
     if "kind" not in col_names:
         conn.execute("ALTER TABLE today_queue ADD COLUMN kind TEXT NOT NULL DEFAULT 'new';")
-        # 기존 데이터는 의미를 알 수 없으니 안전하게 new로 둠
+        # Set existing data to 'new' as default (safe fallback)
         conn.execute("UPDATE today_queue SET kind = 'new' WHERE kind IS NULL OR kind = '';")
         conn.commit()
 
@@ -99,7 +99,7 @@ def fetch_unreviewed_clip_ids(conn, limit: int) -> list[int]:
 # -----------------------------
 
 def gemini_calls_today(conn: sqlite3.Connection) -> int:
-    """Local-time 기준 오늘 gemini 호출 횟수."""
+    """Count of Gemini API calls made today (local time)."""
     row = conn.execute(
         """
         SELECT COUNT(*)
@@ -116,3 +116,45 @@ def log_gemini_call(conn: sqlite3.Connection, reason: str) -> None:
         (reason,),
     )
     conn.commit()
+
+
+def reset_db() -> dict:
+    """
+    Completely reset the database. Deletes all data from all tables and recreates the schema.
+    Returns: Dictionary with deleted record counts
+    """
+    conn = get_conn()
+    
+    # Count records in each table before deletion
+    counts = {}
+    tables = ['reviews', 'today_queue', 'clips', 'gemini_calls', 'bad_slugs']
+    for table in tables:
+        row = conn.execute(f"SELECT COUNT(*) as cnt FROM {table}").fetchone()
+        counts[table] = row['cnt'] if row else 0
+    
+    # Temporarily disable foreign key constraints
+    conn.execute("PRAGMA foreign_keys = OFF")
+    
+    # Delete all data from tables (order matters: reverse of foreign key references)
+    conn.execute("DELETE FROM reviews")
+    conn.execute("DELETE FROM today_queue")
+    conn.execute("DELETE FROM clips")
+    conn.execute("DELETE FROM gemini_calls")
+    conn.execute("DELETE FROM bad_slugs")
+    
+    # Reset AUTOINCREMENT sequences
+    conn.execute("DELETE FROM sqlite_sequence")
+    
+    # Re-enable foreign key constraints
+    conn.execute("PRAGMA foreign_keys = ON")
+    
+    conn.commit()
+    conn.close()
+    
+    # Recreate schema (including indexes)
+    init_db()
+    
+    return {
+        "deleted": counts,
+        "status": "reset_complete"
+    }

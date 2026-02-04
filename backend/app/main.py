@@ -1,4 +1,4 @@
-from app.db import init_db, DB_PATH
+from app.db import init_db, DB_PATH, reset_db
 from app.db import get_conn, count_unreviewed_clips, is_slug_blocked, block_slug
 from zoneinfo import ZoneInfo
 from datetime import datetime, timedelta, timezone
@@ -225,11 +225,11 @@ def reroll_new_only(conn: sqlite3.Connection, day: str, limit: int) -> list[sqli
         if len(picked) == needed:
             break
 
-    # 후보 부족하면 가능한 만큼만 교체
-    # 기존 new 행 삭제
+    # Replace only what we can (if not enough candidates)
+    # Delete existing 'new' rows
     conn.execute("DELETE FROM today_queue WHERE day = ? AND kind = 'new'", (day,))
 
-    # 같은 position에 다시 채우기
+    # Fill the same positions with new clips
     for pos, cid in zip(sorted(new_positions), picked):
         conn.execute(
             "INSERT INTO today_queue (day, position, clip_id, kind) VALUES (?, ?, ?, 'new')",
@@ -548,6 +548,23 @@ def health():
 @app.get("/db/health")
 def db_health():
     return {"db": "ok", "path": str(DB_PATH)}
+
+@app.post("/db/reset")
+def reset_database():
+    """
+    Completely reset the database. Deletes all data and recreates the schema.
+    WARNING: This operation is irreversible!
+    """
+    try:
+        result = reset_db()
+        return {
+            "status": "success",
+            "message": "Database reset complete",
+            "deleted": result["deleted"],
+            "dbPath": str(DB_PATH)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Reset failed: {str(e)}")
 
 @app.get("/today")
 def get_today_payload():
