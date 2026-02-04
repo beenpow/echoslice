@@ -549,6 +549,40 @@ def health():
 def db_health():
     return {"db": "ok", "path": str(DB_PATH)}
 
+@app.get("/db/stats")
+def db_stats():
+    """Get database statistics: counts of clips, reviews, etc."""
+    with get_conn() as conn:
+        total_clips = conn.execute("SELECT COUNT(*) as cnt FROM clips").fetchone()["cnt"]
+        unreviewed_clips = count_unreviewed_clips(conn)
+        reviewed_clips = total_clips - unreviewed_clips
+        
+        total_reviews = conn.execute("SELECT COUNT(*) as cnt FROM reviews").fetchone()["cnt"]
+        today_queue_count = conn.execute("SELECT COUNT(*) as cnt FROM today_queue").fetchone()["cnt"]
+        gemini_calls_count = conn.execute("SELECT COUNT(*) as cnt FROM gemini_calls").fetchone()["cnt"]
+        bad_slugs_count = conn.execute("SELECT COUNT(*) as cnt FROM bad_slugs").fetchone()["cnt"]
+        
+        # Count by source
+        source_counts = {}
+        source_rows = conn.execute(
+            "SELECT source, COUNT(*) as cnt FROM clips GROUP BY source"
+        ).fetchall()
+        for row in source_rows:
+            source_counts[row["source"]] = row["cnt"]
+        
+    return {
+        "clips": {
+            "total": total_clips,
+            "reviewed": reviewed_clips,
+            "unreviewed": unreviewed_clips,
+        },
+        "reviews": total_reviews,
+        "todayQueue": today_queue_count,
+        "geminiCalls": gemini_calls_count,
+        "badSlugs": bad_slugs_count,
+        "clipsBySource": source_counts,
+    }
+
 @app.post("/db/reset")
 def reset_database():
     """
