@@ -359,3 +359,22 @@
   color: var(--color-text-muted);
   margin-left: auto;
 }
+
+@media (max-width: 768px) {
+  .app {
+    padding: 12px;
+  }
+
+  .app-body {
+    flex-direction: column;
+  }
+
+  .main-content {
+    width: 100%;
+    order: -1;
+  }
+
+  .sidebar {
+    width: 100%;
+  }
+}
