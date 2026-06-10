@@ -5,7 +5,6 @@ from datetime import datetime, timedelta, timezone
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import sqlite3
 import random
 import time
 import os
@@ -86,19 +85,19 @@ def la_day_to_utc_bounds(day_str: str) -> tuple[str, str]:
     end_utc = end_la.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     return start_utc, end_utc
 
-def fetch_today_queue(conn: sqlite3.Connection, day: str) -> list[sqlite3.Row]:
+def fetch_today_queue(conn, day: str) -> list:
     return conn.execute(
         """
         SELECT tq.position, tq.kind, c.id, c.video_id, c.start_sec, c.end_sec, c.title
         FROM today_queue tq
         JOIN clips c ON c.id = tq.clip_id
-        WHERE tq.day = ?
+        WHERE tq.day = %s
         ORDER BY tq.position ASC
         """,
         (day,),
     ).fetchall()
 
-def create_today_queue(conn: sqlite3.Connection, day: str, limit: int, review_target: int) -> list[sqlite3.Row]:
+def create_today_queue(conn, day: str, limit: int, review_target: int) -> list:
     now_s = now_str_utc()
 
     # 0) 오늘 완료된 clip 제외 (오늘 리뷰한 clip)
@@ -107,7 +106,7 @@ def create_today_queue(conn: sqlite3.Connection, day: str, limit: int, review_ta
         """
         SELECT DISTINCT clip_id
         FROM reviews
-        WHERE reviewed_at >= ? AND reviewed_at < ?
+        WHERE reviewed_at >= %s AND reviewed_at < %s
         """,
         (start_utc, end_utc),
     ).fetchall()
@@ -123,9 +122,9 @@ def create_today_queue(conn: sqlite3.Connection, day: str, limit: int, review_ta
           FROM reviews
           GROUP BY clip_id
         ) r_due ON r_due.clip_id = c.id
-        WHERE r_due.next_review_at <= ?
+        WHERE r_due.next_review_at <= %s
         ORDER BY r_due.next_review_at ASC
-        LIMIT ?
+        LIMIT %s
         """,
         (now_s, review_target),
     ).fetchall()
@@ -147,25 +146,25 @@ def create_today_queue(conn: sqlite3.Connection, day: str, limit: int, review_ta
         LEFT JOIN reviews r ON r.clip_id = c.id
         WHERE r.clip_id IS NULL
         ORDER BY RANDOM()
-        LIMIT ?
+        LIMIT %s
         """,
         (slots_left,),
     ).fetchall()
     new_ids = [r["id"] for r in new_rows if r["id"] not in done_set and r["id"] not in set(review_ids)]
 
     # 3) 저장: 오늘 큐 전체를 새로 생성
-    conn.execute("DELETE FROM today_queue WHERE day = ?", (day,))
+    conn.execute("DELETE FROM today_queue WHERE day = %s", (day,))
     pos = 0
     for cid in review_ids:
         conn.execute(
-            "INSERT INTO today_queue (day, position, clip_id, kind) VALUES (?, ?, ?, 'review')",
+            "INSERT INTO today_queue (day, position, clip_id, kind) VALUES (%s, %s, %s, 'review')",
             (day, pos, cid),
         )
         pos += 1
     print("reviews_ids size : " + str(pos))
     for cid in new_ids:
         conn.execute(
-            "INSERT INTO today_queue (day, position, clip_id, kind) VALUES (?, ?, ?, 'new')",
+            "INSERT INTO today_queue (day, position, clip_id, kind) VALUES (%s, %s, %s, 'new')",
             (day, pos, cid),
         )
         pos += 1
@@ -174,7 +173,7 @@ def create_today_queue(conn: sqlite3.Connection, day: str, limit: int, review_ta
 
     return fetch_today_queue(conn, day)
 
-def reroll_new_only(conn: sqlite3.Connection, day: str, limit: int) -> list[sqlite3.Row]:
+def reroll_new_only(conn, day: str, limit: int) -> list:
     # 1) 현재 큐가 없으면 먼저 생성
     existing = fetch_today_queue(conn, day)
     if not existing:
@@ -194,7 +193,7 @@ def reroll_new_only(conn: sqlite3.Connection, day: str, limit: int) -> list[sqli
         """
         SELECT DISTINCT clip_id
         FROM reviews
-        WHERE reviewed_at >= ? AND reviewed_at < ?
+        WHERE reviewed_at >= %s AND reviewed_at < %s
         """,
         (start_utc, end_utc),
     ).fetchall()
@@ -210,7 +209,7 @@ def reroll_new_only(conn: sqlite3.Connection, day: str, limit: int) -> list[sqli
         LEFT JOIN reviews r ON r.clip_id = c.id
         WHERE r.clip_id IS NULL
         ORDER BY RANDOM()
-        LIMIT ?
+        LIMIT %s
         """,
         (needed * 5,),  # 여유 있게 뽑고 중복/제외 필터
     ).fetchall()
@@ -227,12 +226,12 @@ def reroll_new_only(conn: sqlite3.Connection, day: str, limit: int) -> list[sqli
 
     # Replace only what we can (if not enough candidates)
     # Delete existing 'new' rows
-    conn.execute("DELETE FROM today_queue WHERE day = ? AND kind = 'new'", (day,))
+    conn.execute("DELETE FROM today_queue WHERE day = %s AND kind = 'new'", (day,))
 
     # Fill the same positions with new clips
     for pos, cid in zip(sorted(new_positions), picked):
         conn.execute(
-            "INSERT INTO today_queue (day, position, clip_id, kind) VALUES (?, ?, ?, 'new')",
+            "INSERT INTO today_queue (day, position, clip_id, kind) VALUES (%s, %s, %s, 'new')",
             (day, pos, cid),
         )
     conn.commit()
@@ -255,7 +254,7 @@ def calc_next_review_at(score: int) -> datetime:
         days = 14
     return datetime.now(timezone.utc) + timedelta(days=days)
 
-def ensure_new_stock(conn: sqlite3.Connection, min_unused: int):
+def ensure_new_stock(conn, min_unused: int):
     unused_cnt = count_unreviewed_clips(conn)
     if unused_cnt >= min_unused:
         return
@@ -687,7 +686,7 @@ def reroll_today_one(req: RerollOneRequest):
             """
             SELECT clip_id, kind
             FROM today_queue
-            WHERE day = ? AND position = ?
+            WHERE day = %s AND position = %s
             """,
             (day, req.position),
         ).fetchone()
@@ -711,9 +710,9 @@ def reroll_today_one(req: RerollOneRequest):
             LEFT JOIN reviews r ON r.clip_id = c.id
             WHERE r.clip_id IS NULL
             AND c.id NOT IN (
-                SELECT clip_id FROM today_queue WHERE day = ?
+                SELECT clip_id FROM today_queue WHERE day = %s
             )
-            AND c.id != ?
+            AND c.id != %s
             ORDER BY RANDOM()
             LIMIT 1
             """,
@@ -729,8 +728,8 @@ def reroll_today_one(req: RerollOneRequest):
         conn.execute(
             """
             UPDATE today_queue
-            SET clip_id = ?
-            WHERE day = ? AND position = ?
+            SET clip_id = %s
+            WHERE day = %s AND position = %s
             """,
             (new_clip_id, day, req.position),
         )
@@ -752,23 +751,23 @@ def create_review(payload: ReviewCreate):
     
     with get_conn() as conn:
         clip = conn.execute(
-            "SELECT id FROM clips WHERE id = ?",
+            "SELECT id FROM clips WHERE id = %s",
             (payload.clipId,),
         ).fetchone()
 
         if not clip:
             raise HTTPException(status_code=404, detail="clip not found")
-        
+
         cur = conn.execute(
             """
             INSERT INTO reviews (clip_id, score, reviewed_at, next_review_at)
-            VALUES (?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s)
+            RETURNING id
             """,
             (payload.clipId, payload.score, reviewed_at, next_review_at),
         )
+        review_id = cur.fetchone()[0]
         conn.commit()
-
-        review_id = cur.lastrowid
     
     return {
         "id": review_id,
@@ -792,7 +791,7 @@ def get_today_reviews():
                 r.reviewed_at,
                 r.next_review_at
             FROM reviews r
-            WHERE r.reviewed_at >= ? AND r.reviewed_at < ?
+            WHERE r.reviewed_at >= %s AND r.reviewed_at < %s
             ORDER BY r.reviewed_at DESC
             """,
             (start_utc, end_utc),

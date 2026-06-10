@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from typing import Any, Iterable
 import random
 import re
-import sqlite3
 
 from app.ted_popular import fetch_popular_slugs
 from app.ted_talk_page import fetch_talk_next_data
@@ -187,7 +186,7 @@ def generate_clips_for_slug(
     )
 
 def insert_clip_candidates(
-    conn: sqlite3.Connection,
+    conn,
     clips: Iterable[ClipCandidate],
 ) -> int:
     """
@@ -199,7 +198,7 @@ def insert_clip_candidates(
         exists = conn.execute(
             """
             SELECT 1 FROM clips
-            WHERE video_id = ? AND start_sec = ? AND end_sec = ?
+            WHERE video_id = %s AND start_sec = %s AND end_sec = %s
             LIMIT 1
             """,
             (c.video_id, c.start_sec, c.end_sec),
@@ -210,7 +209,7 @@ def insert_clip_candidates(
         conn.execute(
             """
             INSERT INTO clips (video_id, start_sec, end_sec, title)
-            VALUES (?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s)
             """,
             (c.video_id, c.start_sec, c.end_sec, c.title),
         )
@@ -223,7 +222,7 @@ def insert_clip_candidates(
 def _fetch_existing_ranges(conn, video_id: str) -> list[tuple[int, int]]:
     print("_fetch_existing_ranges")
     rows = conn.execute(
-        "SELECT start_sec, end_sec FROM clips WHERE video_id = ? ORDER BY start_sec",
+        "SELECT start_sec, end_sec FROM clips WHERE video_id = %s ORDER BY start_sec",
         (video_id,),
     ).fetchall()
     return [(float(r[0]), float(r[1])) for r in rows]
@@ -272,7 +271,7 @@ def insert_clip_candidates_no_overlap(conn, candidates, talk_slug: str | None, s
             conn.execute(
                 """
                 INSERT INTO clips (video_id, start_sec, end_sec, title, talk_slug, source)
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s, %s)
                 """,
                 (c.video_id, start, end, c.title, talk_slug, source),
             )

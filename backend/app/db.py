@@ -1,49 +1,88 @@
-import sqlite3
 import os
+import psycopg2
+import psycopg2.extras
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent  # backend/app
-#DB_PATH = BASE_DIR.parent / "echoslice.db"  # backend/echoslice.db
-DB_PATH = Path(
-    os.getenv("ECHOSLICE_DB_PATH", BASE_DIR.parent / "echoslice.db")
-)
-DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-SCHEMA_PATH = BASE_DIR / "schema.sql"       # backend/app/schema.sql
+SCHEMA_PATH = Path(__file__).resolve().parent / "schema.sql"
 
-def get_conn() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+_raw_url = os.getenv("DATABASE_URL", "")
+# Hide credentials from /db/health display
+DB_PATH = _raw_url.split("@")[-1] if "@" in _raw_url else (_raw_url or "not configured")
 
 
-def is_slug_blocked(conn: sqlite3.Connection, slug: str) -> bool:
+class _Conn:
+    """Makes psycopg2 connection behave like sqlite3 for minimal code changes."""
+
+    def __init__(self, raw: "psycopg2.extensions.connection") -> None:
+        self._raw = raw
+        self._cur = raw.cursor()
+
+    def execute(self, sql: str, params=None):
+        self._cur.execute(sql, params)
+        return self._cur
+
+    def commit(self) -> None:
+        self._raw.commit()
+
+    def rollback(self) -> None:
+        self._raw.rollback()
+
+    def close(self) -> None:
+        self._cur.close()
+        self._raw.close()
+
+    def __enter__(self) -> "_Conn":
+        return self
+
+    def __exit__(self, exc_type, *_) -> None:
+        if exc_type is None:
+            self._raw.commit()
+        else:
+            self._raw.rollback()
+        self._cur.close()
+        self._raw.close()
+
+
+def get_conn() -> _Conn:
+    raw = psycopg2.connect(_raw_url, cursor_factory=psycopg2.extras.DictCursor)
+    return _Conn(raw)
+
+
+def is_slug_blocked(conn: _Conn, slug: str) -> bool:
     row = conn.execute(
-        "SELECT 1 FROM bad_slugs WHERE slug = ? LIMIT 1;",
+        "SELECT 1 FROM bad_slugs WHERE slug = %s LIMIT 1",
         (slug,),
     ).fetchone()
     return row is not None
 
-def block_slug(conn: sqlite3.Connection, slug: str, reason: str) -> None:
+
+def block_slug(conn: _Conn, slug: str, reason: str) -> None:
     conn.execute(
         """
         INSERT INTO bad_slugs (slug, reason)
-        VALUES (?, ?)
-        ON CONFLICT(slug) DO UPDATE SET
-          reason = excluded.reason,
-          created_at = datetime('now');
+        VALUES (%s, %s)
+        ON CONFLICT (slug) DO UPDATE SET
+          reason = EXCLUDED.reason,
+          created_at = NOW()
         """,
         (slug, reason),
     )
     conn.commit()
 
-def migrate_db(conn: sqlite3.Connection) -> None:
+
+def migrate_db(conn: _Conn) -> None:
     # Add kind column to today_queue if missing (backward compatibility)
-    cols = conn.execute("PRAGMA table_info(today_queue);").fetchall()
-    col_names = {c["name"] for c in cols}
+    cols = conn.execute(
+        "SELECT column_name FROM information_schema.columns WHERE table_name = 'today_queue'"
+    ).fetchall()
+    col_names = {c["column_name"] for c in cols}
     if "kind" not in col_names:
-        conn.execute("ALTER TABLE today_queue ADD COLUMN kind TEXT NOT NULL DEFAULT 'new';")
-        # Set existing data to 'new' as default (safe fallback)
-        conn.execute("UPDATE today_queue SET kind = 'new' WHERE kind IS NULL OR kind = '';")
+        conn.execute(
+            "ALTER TABLE today_queue ADD COLUMN kind TEXT NOT NULL DEFAULT 'new'"
+        )
+        conn.execute(
+            "UPDATE today_queue SET kind = 'new' WHERE kind IS NULL OR kind = ''"
+        )
         conn.commit()
 
     conn.execute(
@@ -51,12 +90,12 @@ def migrate_db(conn: sqlite3.Connection) -> None:
         CREATE TABLE IF NOT EXISTS bad_slugs (
           slug TEXT PRIMARY KEY,
           reason TEXT NOT NULL,
-          created_at TEXT NOT NULL DEFAULT (datetime('now'))
-        );
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
         """
     )
     conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_bad_slugs_created_at ON bad_slugs(created_at);"
+        "CREATE INDEX IF NOT EXISTS idx_bad_slugs_created_at ON bad_slugs(created_at)"
     )
     conn.commit()
 
@@ -64,11 +103,15 @@ def migrate_db(conn: sqlite3.Connection) -> None:
 def init_db() -> None:
     schema_sql = SCHEMA_PATH.read_text(encoding="utf-8")
     with get_conn() as conn:
-        conn.executescript(schema_sql)
+        for stmt in schema_sql.split(";"):
+            stmt = stmt.strip()
+            if stmt and not stmt.startswith("--"):
+                conn.execute(stmt)
         conn.commit()
         migrate_db(conn)
 
-def count_unreviewed_clips(conn) -> int:
+
+def count_unreviewed_clips(conn: _Conn) -> int:
     row = conn.execute(
         """
         SELECT COUNT(*)
@@ -80,7 +123,7 @@ def count_unreviewed_clips(conn) -> int:
     return int(row[0]) if row else 0
 
 
-def fetch_unreviewed_clip_ids(conn, limit: int) -> list[int]:
+def fetch_unreviewed_clip_ids(conn: _Conn, limit: int) -> list[int]:
     rows = conn.execute(
         """
         SELECT c.id
@@ -88,31 +131,28 @@ def fetch_unreviewed_clip_ids(conn, limit: int) -> list[int]:
         LEFT JOIN reviews r ON r.clip_id = c.id
         WHERE r.id IS NULL
         ORDER BY c.id DESC
-        LIMIT ?
+        LIMIT %s
         """,
         (limit,),
     ).fetchall()
     return [int(r[0]) for r in rows]
 
-# -----------------------------
-# Gemini API usage guard helpers
-# -----------------------------
 
-def gemini_calls_today(conn: sqlite3.Connection) -> int:
-    """Count of Gemini API calls made today (local time)."""
+def gemini_calls_today(conn: _Conn) -> int:
     row = conn.execute(
         """
         SELECT COUNT(*)
         FROM gemini_calls
-        WHERE DATE(created_at, 'localtime') = DATE('now', 'localtime')
+        WHERE (created_at AT TIME ZONE 'America/Los_Angeles')::date
+              = (NOW() AT TIME ZONE 'America/Los_Angeles')::date
         """
     ).fetchone()
     return int(row[0]) if row else 0
 
 
-def log_gemini_call(conn: sqlite3.Connection, reason: str) -> None:
+def log_gemini_call(conn: _Conn, reason: str) -> None:
     conn.execute(
-        "INSERT INTO gemini_calls (reason) VALUES (?);",
+        "INSERT INTO gemini_calls (reason) VALUES (%s)",
         (reason,),
     )
     conn.commit()
@@ -124,36 +164,21 @@ def reset_db() -> dict:
     Returns: Dictionary with deleted record counts
     """
     conn = get_conn()
-    
-    # Count records in each table before deletion
+
     counts = {}
     tables = ['reviews', 'today_queue', 'clips', 'gemini_calls', 'bad_slugs']
     for table in tables:
-        row = conn.execute(f"SELECT COUNT(*) as cnt FROM {table}").fetchone()
+        row = conn.execute(f"SELECT COUNT(*) AS cnt FROM {table}").fetchone()
         counts[table] = row['cnt'] if row else 0
-    
-    # Temporarily disable foreign key constraints
-    conn.execute("PRAGMA foreign_keys = OFF")
-    
-    # Delete all data from tables (order matters: reverse of foreign key references)
-    conn.execute("DELETE FROM reviews")
-    conn.execute("DELETE FROM today_queue")
-    conn.execute("DELETE FROM clips")
-    conn.execute("DELETE FROM gemini_calls")
-    conn.execute("DELETE FROM bad_slugs")
-    
-    # Reset AUTOINCREMENT sequences
-    conn.execute("DELETE FROM sqlite_sequence")
-    
-    # Re-enable foreign key constraints
-    conn.execute("PRAGMA foreign_keys = ON")
-    
+
+    conn.execute(
+        "TRUNCATE TABLE reviews, today_queue, clips, gemini_calls, bad_slugs RESTART IDENTITY"
+    )
     conn.commit()
     conn.close()
-    
-    # Recreate schema (including indexes)
+
     init_db()
-    
+
     return {
         "deleted": counts,
         "status": "reset_complete"
