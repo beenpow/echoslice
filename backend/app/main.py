@@ -626,7 +626,7 @@ def get_today_payload():
             """
             SELECT DISTINCT clip_id
             FROM reviews
-            WHERE reviewed_at >= ? AND reviewed_at < ?
+            WHERE reviewed_at >= %s AND reviewed_at < %s
             """,
             (start_utc, end_utc),
         ).fetchall()
