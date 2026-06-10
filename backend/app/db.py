@@ -104,8 +104,12 @@ def init_db() -> None:
     schema_sql = SCHEMA_PATH.read_text(encoding="utf-8")
     with get_conn() as conn:
         for stmt in schema_sql.split(";"):
-            stmt = stmt.strip()
-            if stmt and not stmt.startswith("--"):
+            lines = [
+                line for line in stmt.splitlines()
+                if not line.strip().startswith("--")
+            ]
+            stmt = "\n".join(lines).strip()
+            if stmt:
                 conn.execute(stmt)
         conn.commit()
         migrate_db(conn)
