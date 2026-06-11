@@ -213,6 +213,7 @@ function App() {
           {selectedClip && (
             <>
               <YoutubeClipPlayer
+                clipId={selectedClip.id}
                 videoId={selectedClip.videoId}
                 startSec={selectedClip.startSec}
                 endSec={selectedClip.endSec}

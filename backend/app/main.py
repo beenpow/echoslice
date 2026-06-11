@@ -14,6 +14,7 @@ from app.ted_talk_page import fetch_talk_next_data
 from app.ted_extract import extract_youtube_id, extract_transcript_cues
 from app.ted_clips import generate_clips_for_slug, insert_clip_candidates_no_overlap
 from app.ted_ai import generate_ai_clips_for_slug
+from app.transcript import get_clip_transcript
 from dotenv import load_dotenv
 from pathlib import Path
 from app.routers.timeslicer import router as timeslicer_router
@@ -657,6 +658,24 @@ def get_today_clips() -> list[dict[str, Any]]:
         }
         for row in rows
     ]
+
+@app.get("/clips/{clip_id}/transcript")
+def get_clip_transcript_endpoint(clip_id: int):
+    with get_conn() as conn:
+        clip = conn.execute(
+            "SELECT video_id, start_sec, end_sec FROM clips WHERE id = %s",
+            (clip_id,),
+        ).fetchone()
+
+    if not clip:
+        raise HTTPException(status_code=404, detail="clip not found")
+
+    try:
+        segments = get_clip_transcript(clip["video_id"], clip["start_sec"], clip["end_sec"])
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"failed to fetch transcript: {e}")
+
+    return {"segments": segments}
 
 @app.post("/clips/today/reroll")
 def reroll_today_new() -> list[dict[str, Any]]:

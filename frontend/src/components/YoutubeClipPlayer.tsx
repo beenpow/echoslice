@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { fetchClipTranscript, type TranscriptSegment } from '../api/transcript';
 
 declare global {
     interface Window {
@@ -8,12 +9,13 @@ declare global {
 }
 
 type Props = {
+    clipId: number;
     videoId: string;
     startSec: number;
     endSec: number;
 };
 
-export default function YoutubeClipPlayer({ videoId, startSec, endSec }: Props) {
+export default function YoutubeClipPlayer({ clipId, videoId, startSec, endSec }: Props) {
     const containerRef = useRef<HTMLDivElement>(null);
     const playBtnRef = useRef<HTMLButtonElement>(null);
     const playerRef = useRef<any>(null);
@@ -25,6 +27,10 @@ export default function YoutubeClipPlayer({ videoId, startSec, endSec }: Props) 
     const [loopCount, setLoopCount] = useState(0);
     const pendingCueRef = useRef<{ videoId: string } | null>(null);
     const loopTriggeredRef = useRef(false);
+
+    const [segments, setSegments] = useState<TranscriptSegment[]>([]);
+    const [activeIndex, setActiveIndex] = useState(-1);
+    const segmentRefs = useRef<(HTMLDivElement | null)[]>([]);
 
     const handlePlayFromStart = () => {
         const player = playerRef.current;
@@ -95,11 +101,53 @@ export default function YoutubeClipPlayer({ videoId, startSec, endSec }: Props) 
             } else {
                 loopTriggeredRef.current = false;
             }
+
+            setActiveIndex((prev) => {
+                const idx = segments.findIndex(
+                    (s) => current >= s.start && current < s.end
+                );
+                return idx === prev ? prev : idx;
+            });
         }, 200);
         return () => {
             window.clearInterval(intervalId);
         };
-    }, [isPlaying, endSec, isLooping, startSec]);
+    }, [isPlaying, endSec, isLooping, startSec, segments]);
+
+    useEffect(() => {
+        let cancelled = false;
+        setSegments([]);
+        setActiveIndex(-1);
+
+        fetchClipTranscript(clipId)
+            .then((segs) => {
+                if (!cancelled) setSegments(segs);
+            })
+            .catch(() => {
+                if (!cancelled) setSegments([]);
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [clipId]);
+
+    useEffect(() => {
+        if (activeIndex < 0) return;
+        const el = segmentRefs.current[activeIndex];
+        const box = el?.parentElement;
+        if (!el || !box) return;
+
+        const elRect = el.getBoundingClientRect();
+        const boxRect = box.getBoundingClientRect();
+        const elOffsetInBox = elRect.top - boxRect.top + box.scrollTop;
+
+        const target = elOffsetInBox - box.clientHeight / 2 + el.offsetHeight / 2;
+        box.scrollTo({
+            top: Math.max(0, target),
+            behavior: "smooth",
+        });
+    }, [activeIndex]);
 
     useEffect(() => {
         const player = playerRef.current;
@@ -204,6 +252,19 @@ export default function YoutubeClipPlayer({ videoId, startSec, endSec }: Props) 
                     {startSec}s – {endSec}s
                 </span>
             </div>
+            {segments.length > 0 && (
+                <div className="transcript-box">
+                    {segments.map((seg, i) => (
+                        <div
+                            key={i}
+                            ref={(el) => { segmentRefs.current[i] = el; }}
+                            className={`transcript-line ${i === activeIndex ? "active" : ""}`}
+                        >
+                            {seg.text}
+                        </div>
+                    ))}
+                </div>
+            )}
         </div>
     );
 }
