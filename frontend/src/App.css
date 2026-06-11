@@ -354,10 +354,16 @@
   color: var(--color-accent);
 }
 
+.player-loop-count {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-accent);
+  margin-left: auto;
+}
+
 .player-time {
   font-size: 0.85rem;
   color: var(--color-text-muted);
-  margin-left: auto;
 }
 
 @media (max-width: 768px) {

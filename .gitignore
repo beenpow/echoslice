@@ -1,3 +1,4 @@
 backend/DB_BACKUP/pull_db_from_brad13.sh
 backend/DB_BACKUP/cmd.txt
 .mcp.json
+.claude/launch.json

@@ -22,7 +22,9 @@ export default function YoutubeClipPlayer({ videoId, startSec, endSec }: Props) 
     const [isCCOn, setIsCCOn] = useState(true);
 
     const [isReady, setIsReady] = useState(false);
+    const [loopCount, setLoopCount] = useState(0);
     const pendingCueRef = useRef<{ videoId: string } | null>(null);
+    const loopTriggeredRef = useRef(false);
 
     const handlePlayFromStart = () => {
         const player = playerRef.current;
@@ -79,6 +81,10 @@ export default function YoutubeClipPlayer({ videoId, startSec, endSec }: Props) 
 
             const current = player.getCurrentTime();
             if (current >= endSec) {
+                if (loopTriggeredRef.current) return;
+                loopTriggeredRef.current = true;
+
+                setLoopCount((prev) => prev + 1);
                 if (isLooping) {
                     player.seekTo(startSec, true);
                     player.playVideo();
@@ -86,6 +92,8 @@ export default function YoutubeClipPlayer({ videoId, startSec, endSec }: Props) 
                     player.pauseVideo();
                     setIsPlaying(false);
                 }
+            } else {
+                loopTriggeredRef.current = false;
             }
         }, 200);
         return () => {
@@ -103,6 +111,8 @@ export default function YoutubeClipPlayer({ videoId, startSec, endSec }: Props) 
         }
         player.cueVideoById(videoId);
         setIsPlaying(false);
+        setLoopCount(0);
+        loopTriggeredRef.current = false;
     }, [videoId, isReady]);
 
     useEffect(() => {
@@ -187,6 +197,9 @@ export default function YoutubeClipPlayer({ videoId, startSec, endSec }: Props) 
                 >
                     CC {isCCOn ? "ON" : "OFF"}
                 </button>
+                <span className="player-loop-count" title="Loop count">
+                    🔁 {loopCount}
+                </span>
                 <span className="player-time">
                     {startSec}s – {endSec}s
                 </span>
