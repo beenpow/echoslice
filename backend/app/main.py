@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+import json
 import random
 import time
 import os
@@ -663,17 +664,26 @@ def get_today_clips() -> list[dict[str, Any]]:
 def get_clip_transcript_endpoint(clip_id: int):
     with get_conn() as conn:
         clip = conn.execute(
-            "SELECT video_id, start_sec, end_sec FROM clips WHERE id = %s",
+            "SELECT video_id, start_sec, end_sec, transcript_json FROM clips WHERE id = %s",
             (clip_id,),
         ).fetchone()
 
-    if not clip:
-        raise HTTPException(status_code=404, detail="clip not found")
+        if not clip:
+            raise HTTPException(status_code=404, detail="clip not found")
 
-    try:
-        segments = get_clip_transcript(clip["video_id"], clip["start_sec"], clip["end_sec"])
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"failed to fetch transcript: {e}")
+        if clip["transcript_json"]:
+            return {"segments": json.loads(clip["transcript_json"])}
+
+        try:
+            segments = get_clip_transcript(clip["video_id"], clip["start_sec"], clip["end_sec"])
+        except Exception:
+            return {"segments": []}
+
+        conn.execute(
+            "UPDATE clips SET transcript_json = %s WHERE id = %s",
+            (json.dumps(segments), clip_id),
+        )
+        conn.commit()
 
     return {"segments": segments}
 

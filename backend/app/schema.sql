@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS clips (
   title TEXT,
   talk_slug TEXT,
   source TEXT NOT NULL DEFAULT 'unknown',
+  transcript_json TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 

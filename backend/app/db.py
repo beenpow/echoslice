@@ -99,6 +99,15 @@ def migrate_db(conn: _Conn) -> None:
     )
     conn.commit()
 
+    # Add transcript_json column to clips if missing (backward compatibility)
+    cols = conn.execute(
+        "SELECT column_name FROM information_schema.columns WHERE table_name = 'clips'"
+    ).fetchall()
+    col_names = {c["column_name"] for c in cols}
+    if "transcript_json" not in col_names:
+        conn.execute("ALTER TABLE clips ADD COLUMN transcript_json TEXT")
+        conn.commit()
+
 
 def init_db() -> None:
     schema_sql = SCHEMA_PATH.read_text(encoding="utf-8")
